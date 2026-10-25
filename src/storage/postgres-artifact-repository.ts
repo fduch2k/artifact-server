@@ -1601,6 +1601,8 @@ export class PostgresArtifactRepository implements
           command.artifactId,
           true,
         );
+        if (yield* this.#hasGrant(artifact.id, command.memberId)) return {changed: false};
+        yield* this.#assertActionKeyUnused(command.projectId, command.idempotencyKey);
         const inserted = yield* sql`INSERT INTO artifact_grants (
             installation_id, project_id, artifact_id, principal_id,
             granted_by_principal_id, granted_at
@@ -1631,6 +1633,10 @@ export class PostgresArtifactRepository implements
           command.artifactId,
           true,
         );
+        if (!(yield* this.#hasGrant(artifact.id, command.memberId))) {
+          return {changed: false};
+        }
+        yield* this.#assertActionKeyUnused(command.projectId, command.idempotencyKey);
         const removed = yield* sql`DELETE FROM artifact_grants
           WHERE installation_id = ${installationId}
             AND project_id = ${command.projectId}
@@ -3618,6 +3624,44 @@ export class PostgresArtifactRepository implements
         [installationId, artifactId],
       );
       return z.array(artifactTagRowSchema).parse(rows).map((row) => row.tag);
+    });
+  }
+
+  #hasGrant(
+    artifactId: string,
+    principalId: string,
+  ): Effect.Effect<boolean, unknown, SqlClient> {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql`SELECT 1 AS present FROM artifact_grants
+        WHERE installation_id = ${installationId}
+          AND artifact_id = ${artifactId}
+          AND principal_id = ${principalId}`;
+      return rows.length > 0;
+    });
+  }
+
+  /**
+   * Refuse a key that already recorded a different change: a grant or
+   * revocation keeps no replay record, so reuse can only mean another change.
+   */
+  #assertActionKeyUnused(
+    projectId: string,
+    idempotencyKey: string,
+  ): Effect.Effect<void, unknown, SqlClient> {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql`SELECT 1 AS present FROM actions
+        WHERE installation_id = ${installationId}
+          AND project_id = ${projectId}
+          AND idempotency_key = ${idempotencyKey}`;
+      if (rows.length > 0) {
+        yield* Effect.fail(new IdempotencyConflict({
+          message: "The idempotency key was already used with different input.",
+        }));
+      }
     });
   }
 

@@ -935,6 +935,21 @@ export function createD1ArtifactRepository(
     }
     return statements;
   };
+  // A grant or revocation keeps no replay record, so a key that already
+  // recorded an action can only mean a different change.
+  const assertActionKeyUnused = async (
+    projectId: string,
+    idempotencyKey: string,
+  ): Promise<void> => {
+    const used = await database.prepare(`
+      SELECT 1 AS present FROM actions WHERE project_id = ? AND idempotency_key = ?
+    `).bind(projectId, idempotencyKey).first();
+    if (used !== null) {
+      throw new IdempotencyConflict({
+        message: "The idempotency key was already used with different input.",
+      });
+    }
+  };
   // Records a change of who sees an artifact only when the statement just
   // before it in the same batch changed exactly one grant row.
   const conditionalActionStatement = (
@@ -2854,6 +2869,8 @@ export function createD1ArtifactRepository(
       command: GrantArtifactAccess,
     ): Promise<ArtifactGrantChange> => {
       const artifact = await readArtifact(command.projectId, command.artifactId);
+      if (artifact.grantedPrincipalIds.includes(command.memberId)) return {changed: false};
+      await assertActionKeyUnused(command.projectId, command.idempotencyKey);
       // One batch is one transaction: the action is recorded only when the
       // grant row was new, and only while the artifact is still live.
       const [inserted] = await database.batch([
@@ -2884,6 +2901,8 @@ export function createD1ArtifactRepository(
       command: RevokeArtifactAccess,
     ): Promise<ArtifactGrantChange> => {
       const artifact = await readArtifact(command.projectId, command.artifactId);
+      if (!artifact.grantedPrincipalIds.includes(command.memberId)) return {changed: false};
+      await assertActionKeyUnused(command.projectId, command.idempotencyKey);
       // The member's open content stops serving in the same batch, and only
       // while the grant being removed still exists.
       const revocations = artifact.accessSetting === accessSettings.restricted

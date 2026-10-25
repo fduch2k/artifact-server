@@ -1778,6 +1778,8 @@ export class SqliteArtifactRepository implements
     return Promise.resolve().then(() =>
       this.#transaction(() => {
         const artifact = this.#readArtifact(command.projectId, command.artifactId);
+        if (this.#hasGrant(artifact.id, command.memberId)) return {changed: false};
+        this.#assertActionKeyUnused(command.projectId, command.idempotencyKey);
         const inserted = this.#database
           .prepare(
             `INSERT INTO artifact_grants (
@@ -1812,6 +1814,8 @@ export class SqliteArtifactRepository implements
     return Promise.resolve().then(() =>
       this.#transaction(() => {
         const artifact = this.#readArtifact(command.projectId, command.artifactId);
+        if (!this.#hasGrant(artifact.id, command.memberId)) return {changed: false};
+        this.#assertActionKeyUnused(command.projectId, command.idempotencyKey);
         const removed = this.#database
           .prepare(
             `DELETE FROM artifact_grants
@@ -5100,6 +5104,33 @@ export class SqliteArtifactRepository implements
           artifact.ownerPrincipalId,
           artifact.id,
         );
+    }
+  }
+
+  #hasGrant(artifactId: string, principalId: string): boolean {
+    return this.#database
+      .prepare(
+        `SELECT 1 AS present FROM artifact_grants
+         WHERE artifact_id = ? AND principal_id = ?`,
+      )
+      .get(artifactId, principalId) !== undefined;
+  }
+
+  /**
+   * Refuse a key that already recorded a different change: a grant or
+   * revocation keeps no replay record, so reuse can only mean another change.
+   */
+  #assertActionKeyUnused(projectId: string, idempotencyKey: string): void {
+    const used = this.#database
+      .prepare(
+        `SELECT 1 AS present FROM actions
+         WHERE project_id = ? AND idempotency_key = ?`,
+      )
+      .get(projectId, idempotencyKey);
+    if (used !== undefined) {
+      throw new IdempotencyConflict({
+        message: "The idempotency key was already used with different input.",
+      });
     }
   }
 

@@ -515,16 +515,18 @@ export function createApplicationLayer(
       grantArtifactAccess: (command) =>
         Effect.tryPromise({
           try: () => adapters.repository.grantArtifactAccess(command),
-          catch: (cause) => cause instanceof ArtifactNotFound
-            ? cause
-            : repositoryFailure("grantArtifactAccess", cause),
+          catch: (cause) =>
+            cause instanceof ArtifactNotFound || cause instanceof IdempotencyConflict
+              ? cause
+              : repositoryFailure("grantArtifactAccess", cause),
         }),
       revokeArtifactAccess: (command) =>
         Effect.tryPromise({
           try: () => adapters.repository.revokeArtifactAccess(command),
-          catch: (cause) => cause instanceof ArtifactNotFound
-            ? cause
-            : repositoryFailure("revokeArtifactAccess", cause),
+          catch: (cause) =>
+            cause instanceof ArtifactNotFound || cause instanceof IdempotencyConflict
+              ? cause
+              : repositoryFailure("revokeArtifactAccess", cause),
         }),
       listArtifactGrants: (projectId, artifactId) =>
         Effect.tryPromise({

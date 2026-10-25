@@ -306,6 +306,24 @@ describe("restricted artifacts shared with named members", () => {
     );
     expect(deactivated.status).toBe(404);
     expect((await readArtifact(ada, metrics.id)).grantedPrincipalIds).toEqual([ben.id]);
+
+    // A key that already recorded one change cannot carry a different one.
+    const notes = await publishAs(ada, "Ada's notes", "restricted");
+    const reusedKey = crypto.randomUUID();
+    const granted = await request(ada, "PUT", artifactPath(notes.id, `/grants/${ben.id}`), {
+      idempotencyKey: reusedKey,
+    });
+    expect(grantChangeSchema.parse(await granted.json())).toEqual({changed: true});
+    const reused = await request(ada, "DELETE", artifactPath(notes.id, `/grants/${ben.id}`), {
+      idempotencyKey: reusedKey,
+    });
+    expect(reused.status).toBe(409);
+    expect(errorSchema.parse(await reused.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+    expect((await readArtifact(ada, notes.id)).grantedPrincipalIds).toEqual([ben.id]);
+    const retried = await request(ada, "PUT", artifactPath(notes.id, `/grants/${ben.id}`), {
+      idempotencyKey: reusedKey,
+    });
+    expect(grantChangeSchema.parse(await retried.json())).toEqual({changed: false});
   });
 
   function administratorActor(): BrowserActor {
@@ -450,7 +468,7 @@ describe("restricted artifacts shared with named members", () => {
     actor: Caller,
     method: string,
     requestPath: string,
-    options: {readonly idempotent?: boolean} = {},
+    options: {readonly idempotencyKey?: string; readonly idempotent?: boolean} = {},
   ): Promise<Response> {
     return fetch(`${server.baseUrl}${requestPath}`, {
       headers: headersFor(actor, options),
@@ -473,7 +491,11 @@ describe("restricted artifacts shared with named members", () => {
 
   function headersFor(
     actor: Caller,
-    options: {readonly idempotent?: boolean; readonly json?: boolean} = {},
+    options: {
+      readonly idempotencyKey?: string;
+      readonly idempotent?: boolean;
+      readonly json?: boolean;
+    } = {},
   ): Headers {
     const headers = "cookies" in actor
       ? new Headers({
@@ -485,7 +507,9 @@ describe("restricted artifacts shared with named members", () => {
       })
       : new Headers({Authorization: `Bearer ${actor.token}`});
     if (options.json === true) headers.set("Content-Type", "application/json");
-    if (options.idempotent === true) {
+    if (options.idempotencyKey !== undefined) {
+      headers.set("Idempotency-Key", options.idempotencyKey);
+    } else if (options.idempotent === true) {
       headers.set("Idempotency-Key", crypto.randomUUID());
     }
     return headers;

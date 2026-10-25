@@ -524,6 +524,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           "ALTER TABLE artifacts DROP COLUMN search_name",
           "ALTER TABLE artifacts DROP COLUMN project_id CASCADE",
           "ALTER TABLE login_attempts DROP COLUMN nonce",
+          "DROP TABLE artifact_grants",
           "DROP TABLE comment_replies",
           "DROP TABLE comment_threads",
           "DROP TABLE agent_dispatches",
@@ -2179,8 +2180,12 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       expect((await repository.listArtifactGrants(projectId, kept.body.artifact.id))
         .map(({grantedByPrincipalId, principalId}) => ({grantedByPrincipalId, principalId})))
         .toEqual([{grantedByPrincipalId: owner, principalId: "member_someone_else"}]);
-      expect(await repository.revokeArtifactAccess(grant)).toEqual({changed: true});
-      expect(await repository.revokeArtifactAccess(grant)).toEqual({changed: false});
+      // Reusing the grant's key for a different change is a conflict, not a write.
+      await expect(repository.revokeArtifactAccess(grant))
+        .rejects.toMatchObject({_tag: "IdempotencyConflict"});
+      const revoke = {...grant, idempotencyKey: `owner-revoke-${randomUUID()}`};
+      expect(await repository.revokeArtifactAccess(revoke)).toEqual({changed: true});
+      expect(await repository.revokeArtifactAccess(revoke)).toEqual({changed: false});
       expect(await listedFor({kind: "member", principalId: "member_someone_else"}))
         .toEqual(["Shared page"]);
       expect((await repository.findArtifact(projectId, shared.body.artifact.id))

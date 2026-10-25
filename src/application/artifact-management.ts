@@ -212,10 +212,16 @@ export interface ArtifactManagementRepository {
   >;
   readonly grantArtifactAccess: (
     command: GrantArtifactAccess,
-  ) => Effect.Effect<ArtifactGrantChange, ArtifactNotFound | ArtifactRepositoryFailure>;
+  ) => Effect.Effect<
+    ArtifactGrantChange,
+    ArtifactNotFound | IdempotencyConflict | ArtifactRepositoryFailure
+  >;
   readonly revokeArtifactAccess: (
     command: RevokeArtifactAccess,
-  ) => Effect.Effect<ArtifactGrantChange, ArtifactNotFound | ArtifactRepositoryFailure>;
+  ) => Effect.Effect<
+    ArtifactGrantChange,
+    ArtifactNotFound | IdempotencyConflict | ArtifactRepositoryFailure
+  >;
   readonly listArtifactGrants: (
     projectId: string,
     artifactId: string,
