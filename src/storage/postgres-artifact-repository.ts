@@ -40,6 +40,7 @@ import {
   type ArtifactActionPage,
   type ArtifactActionRecord,
   type ArtifactDeletion,
+  type ArtifactGrant,
   type ArtifactPage,
   type ArtifactRecord,
   type ArtifactState,
@@ -70,6 +71,7 @@ import {
 } from "../core/model.js";
 import type {
   AgentDispatchRepository,
+  ArtifactGrantChange,
   ArtifactRepository,
   CancelAgentDispatch,
   ChangeArtifactAccessSetting,
@@ -91,6 +93,7 @@ import type {
   DeleteCommentThread,
   ExchangeContentBootstrap,
   ExpiredStagedUpload,
+  GrantArtifactAccess,
   ListAgentDispatches,
   ListArtifactActions,
   ListArtifacts,
@@ -103,6 +106,7 @@ import type {
   RegisterAgent,
   RenameProject,
   RestoreArtifactVersion,
+  RevokeArtifactAccess,
   SetProjectArchive,
   StagedUploadRepository,
   UpdateCommentReply,
@@ -243,6 +247,17 @@ const artifactListRowSchema = artifactRowSchema.extend({
   versionCount: z.coerce.number().int().positive(),
 });
 const artifactTagRowSchema = z.object({artifactId: z.string(), tag: z.string()});
+const artifactGrantPrincipalRowSchema = z.object({
+  artifactId: z.string(),
+  principalId: z.string(),
+});
+const artifactGrantRowSchema = z.object({
+  artifactId: z.string(),
+  grantedAt: z.string(),
+  grantedByPrincipalId: z.string(),
+  principalId: z.string(),
+  projectId: z.string(),
+});
 const versionRowSchema = z.object({
   artifactId: z.string(),
   contentToken: z.string(),
@@ -1439,7 +1454,8 @@ export class PostgresArtifactRepository implements
             AND deleted_at IS NULL
           RETURNING id, owner_principal_id AS "ownerPrincipalId"`;
         if (!stored.restricted) return update;
-        // Content opened by anyone but the owner stops serving at once.
+        // Content opened by anyone but the owner and the members it is
+        // shared with stops serving at once.
         return update.pipe(Effect.tap(() => Effect.forEach(
           ["content_sessions", "content_bootstraps"] as const,
           (table) => sql.unsafe(
@@ -1448,6 +1464,10 @@ export class PostgresArtifactRepository implements
                AND principal_id IS DISTINCT FROM (
                  SELECT owner_principal_id FROM artifacts
                  WHERE installation_id = $1 AND project_id = $2 AND id = $3
+               )
+               AND principal_id NOT IN (
+                 SELECT principal_id FROM artifact_grants
+                 WHERE installation_id = $1 AND artifact_id = $3
                )`,
             [installationId, command.projectId, command.artifactId],
           ),
@@ -1568,6 +1588,96 @@ export class PostgresArtifactRepository implements
           false,
         );
       }));
+    }));
+  }
+
+  async grantArtifactAccess(command: GrantArtifactAccess): Promise<ArtifactGrantChange> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.withTransaction(Effect.gen({self: this}, function*() {
+        const artifact = yield* this.#readArtifact(
+          command.projectId,
+          command.artifactId,
+          true,
+        );
+        const inserted = yield* sql`INSERT INTO artifact_grants (
+            installation_id, project_id, artifact_id, principal_id,
+            granted_by_principal_id, granted_at
+          ) VALUES (
+            ${installationId}, ${command.projectId}, ${artifact.id},
+            ${command.memberId}, ${command.principalId}, ${command.createdAt}
+          )
+          ON CONFLICT (installation_id, artifact_id, principal_id) DO NOTHING
+          RETURNING principal_id`;
+        if (inserted.length !== 1) return {changed: false};
+        yield* this.#insertAction(
+          command,
+          artifactActionKinds.changeAccess,
+          artifact.currentVersionId,
+        );
+        return {changed: true};
+      }));
+    }));
+  }
+
+  async revokeArtifactAccess(command: RevokeArtifactAccess): Promise<ArtifactGrantChange> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.withTransaction(Effect.gen({self: this}, function*() {
+        const artifact = yield* this.#readArtifact(
+          command.projectId,
+          command.artifactId,
+          true,
+        );
+        const removed = yield* sql`DELETE FROM artifact_grants
+          WHERE installation_id = ${installationId}
+            AND project_id = ${command.projectId}
+            AND artifact_id = ${artifact.id}
+            AND principal_id = ${command.memberId}
+          RETURNING principal_id`;
+        if (removed.length !== 1) return {changed: false};
+        if (artifact.accessSetting === accessSettings.restricted) {
+          // The member's open content stops serving at once.
+          for (const table of ["content_sessions", "content_bootstraps"] as const) {
+            yield* sql.unsafe(
+              `DELETE FROM ${table}
+               WHERE installation_id = $1 AND project_id = $2
+                 AND artifact_id = $3 AND principal_id = $4`,
+              [installationId, command.projectId, artifact.id, command.memberId],
+            );
+          }
+        }
+        yield* this.#insertAction(
+          command,
+          artifactActionKinds.changeAccess,
+          artifact.currentVersionId,
+        );
+        return {changed: true};
+      }));
+    }));
+  }
+
+  async listArtifactGrants(
+    projectId: string,
+    artifactId: string,
+  ): Promise<readonly ArtifactGrant[]> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      const artifact = yield* this.#readArtifact(projectId, artifactId, false);
+      const rows = yield* sql.unsafe<object>(
+        `SELECT project_id AS "projectId", artifact_id AS "artifactId",
+          principal_id AS "principalId",
+          granted_by_principal_id AS "grantedByPrincipalId",
+          granted_at AS "grantedAt"
+         FROM artifact_grants
+         WHERE installation_id = $1 AND project_id = $2 AND artifact_id = $3
+         ORDER BY granted_at, principal_id`,
+        [installationId, projectId, artifact.id],
+      );
+      return z.array(artifactGrantRowSchema).parse(rows);
     }));
   }
 
@@ -1714,8 +1824,9 @@ export class PostgresArtifactRepository implements
       const limitPlaceholder = command.sort === "comments" ? "$8" : "$7";
       // Appended after the limit so the existing placeholders keep their numbers.
       queryParameters.push(...restrictedScopeParameters(command.restrictedScope));
-      const restrictedAllPlaceholder = `$${queryParameters.length - 1}`;
-      const restrictedOwnerPlaceholder = `$${queryParameters.length}`;
+      const restrictedAllPlaceholder = `$${queryParameters.length - 2}`;
+      const restrictedOwnerPlaceholder = `$${queryParameters.length - 1}`;
+      const restrictedGranteePlaceholder = `$${queryParameters.length}`;
       const rows = yield* sql.unsafe<object>(
         `SELECT * FROM (
           SELECT id, project_id AS "projectId", name,
@@ -1739,7 +1850,13 @@ export class PostgresArtifactRepository implements
           WHERE installation_id = $1 AND project_id = $2
             AND deleted_at IS NULL
             AND (NOT restricted OR ${restrictedAllPlaceholder}::int = 1
-              OR owner_principal_id = ${restrictedOwnerPlaceholder}::text)
+              OR owner_principal_id = ${restrictedOwnerPlaceholder}::text
+              OR EXISTS (
+                SELECT 1 FROM artifact_grants access_grant
+                WHERE access_grant.installation_id = artifacts.installation_id
+                  AND access_grant.artifact_id = artifacts.id
+                  AND access_grant.principal_id = ${restrictedGranteePlaceholder}::text
+              ))
             AND ($3::text IS NULL
               OR strpos(search_name, $3) > 0
               OR EXISTS (
@@ -3036,7 +3153,7 @@ export class PostgresArtifactRepository implements
         // no partial markers behind.
         for (const threadId of command.threadIds) {
           // A thread of a restricted artifact the sender cannot see counts as missing.
-          const [restrictedAll, restrictedOwner] =
+          const [restrictedAll, restrictedOwner, restrictedGrantee] =
             restrictedScopeParameters(command.restrictedScope);
           const checked = yield* sql`SELECT
               thread.id AS "id",
@@ -3050,7 +3167,13 @@ export class PostgresArtifactRepository implements
               AND thread.project_id = ${command.projectId}
               AND thread.id = ${threadId}
               AND (NOT artifact.restricted OR ${restrictedAll}::int = 1
-                OR artifact.owner_principal_id = ${restrictedOwner}::text)
+                OR artifact.owner_principal_id = ${restrictedOwner}::text
+                OR EXISTS (
+                  SELECT 1 FROM artifact_grants access_grant
+                  WHERE access_grant.installation_id = artifact.installation_id
+                    AND access_grant.artifact_id = artifact.id
+                    AND access_grant.principal_id = ${restrictedGrantee}::text
+                ))
             FOR UPDATE OF thread`;
           const row = dispatchThreadCheckRowSchema.nullable().parse(
             checked[0] ?? null,
@@ -3475,7 +3598,11 @@ export class PostgresArtifactRepository implements
       const artifact = artifactRowSchema.nullable().parse(rows[0] ?? null);
       return artifact === null
         ? null
-        : {...artifact, tags: yield* this.#readTags(artifact.id)};
+        : {
+          ...artifact,
+          grantedPrincipalIds: yield* this.#readGrantedPrincipalIds(artifact.id),
+          tags: yield* this.#readTags(artifact.id),
+        };
     });
   }
 
@@ -3494,10 +3621,28 @@ export class PostgresArtifactRepository implements
     });
   }
 
+  #readGrantedPrincipalIds(
+    artifactId: string,
+  ): Effect.Effect<readonly string[], unknown, SqlClient> {
+    const installationId = this.#installationId;
+    return Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT artifact_id AS "artifactId", principal_id AS "principalId"
+         FROM artifact_grants
+         WHERE installation_id = $1 AND artifact_id = $2
+         ORDER BY granted_at, principal_id`,
+        [installationId, artifactId],
+      );
+      return z.array(artifactGrantPrincipalRowSchema).parse(rows)
+        .map((row) => row.principalId);
+    });
+  }
+
   #withTagsForArtifacts<Artifact extends z.infer<typeof artifactRowSchema>>(
     artifacts: readonly Artifact[],
   ): Effect.Effect<
-    readonly (Artifact & Pick<ArtifactRecord, "tags">)[],
+    readonly (Artifact & Pick<ArtifactRecord, "grantedPrincipalIds" | "tags">)[],
     unknown,
     SqlClient
   > {
@@ -3505,20 +3650,36 @@ export class PostgresArtifactRepository implements
     return Effect.gen({self: this}, function*() {
       if (artifacts.length === 0) return [];
       const sql = yield* SqlClient;
+      const artifactIds = artifacts.map(({id}) => id);
       const rows = yield* sql.unsafe<object>(
         `SELECT artifact_id AS "artifactId", tag
          FROM artifact_tags
          WHERE installation_id = $1 AND artifact_id = ANY($2::text[])
          ORDER BY artifact_id, tag`,
-        [installationId, artifacts.map(({id}) => id)],
+        [installationId, artifactIds],
+      );
+      const grantRows = yield* sql.unsafe<object>(
+        `SELECT artifact_id AS "artifactId", principal_id AS "principalId"
+         FROM artifact_grants
+         WHERE installation_id = $1 AND artifact_id = ANY($2::text[])
+         ORDER BY artifact_id, granted_at, principal_id`,
+        [installationId, artifactIds],
       );
       const tagsByArtifact = new Map<string, string[]>();
-      for (const artifact of artifacts) tagsByArtifact.set(artifact.id, []);
+      const grantsByArtifact = new Map<string, string[]>();
+      for (const artifact of artifacts) {
+        tagsByArtifact.set(artifact.id, []);
+        grantsByArtifact.set(artifact.id, []);
+      }
       for (const row of z.array(artifactTagRowSchema).parse(rows)) {
         tagsByArtifact.get(row.artifactId)?.push(row.tag);
       }
+      for (const row of z.array(artifactGrantPrincipalRowSchema).parse(grantRows)) {
+        grantsByArtifact.get(row.artifactId)?.push(row.principalId);
+      }
       return artifacts.map((artifact) => ({
         ...artifact,
+        grantedPrincipalIds: grantsByArtifact.get(artifact.id) ?? [],
         tags: tagsByArtifact.get(artifact.id) ?? [],
       }));
     });
@@ -3644,6 +3805,7 @@ export class PostgresArtifactRepository implements
           deletedAt: parsed.artifactDeletedAt,
           id: parsed.artifactId,
           name: parsed.artifactName,
+          grantedPrincipalIds: yield* this.#readGrantedPrincipalIds(parsed.artifactId),
           ownerPrincipalId: parsed.ownerPrincipalId,
           projectId: parsed.projectId,
           tags: yield* this.#readTags(parsed.artifactId),

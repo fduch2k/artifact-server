@@ -8,7 +8,7 @@ import {defaultGitHistoryMaximumCopiedFiles} from
   "../../../src/git-history/git-history-capability.js";
 
 /** D1 schema revision required by the Cloudflare runtime. */
-export const requiredD1SchemaVersion = 10;
+export const requiredD1SchemaVersion = 11;
 
 /** SQL literal list of every action kind the ledger accepts. */
 const actionKindList = [
@@ -618,6 +618,7 @@ export async function migrateD1(
     await widenRegisteredAgentsIfNeeded(database);
     await addArtifactSearchNameIfMissing(database);
     await addArtifactOwnerIfMissing(database);
+    await addArtifactGrantsIfMissing(database);
   }
   await database.batch([
     database.prepare(`
@@ -689,6 +690,26 @@ async function addArtifactOwnerIfMissing(database: D1Database): Promise<void> {
     `),
   );
   await database.batch(statements);
+}
+
+/** Keep the members each restricted artifact is shared with. */
+async function addArtifactGrantsIfMissing(database: D1Database): Promise<void> {
+  await database.batch([
+    database.prepare(`
+      CREATE TABLE IF NOT EXISTS artifact_grants (
+        project_id TEXT NOT NULL REFERENCES projects(id),
+        artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+        principal_id TEXT NOT NULL,
+        granted_by_principal_id TEXT NOT NULL,
+        granted_at TEXT NOT NULL,
+        PRIMARY KEY (artifact_id, principal_id)
+      )
+    `),
+    database.prepare(`
+      CREATE INDEX IF NOT EXISTS artifact_grants_principal
+        ON artifact_grants (principal_id, artifact_id)
+    `),
+  ]);
 }
 
 async function addArtifactSearchNameIfMissing(

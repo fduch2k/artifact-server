@@ -512,6 +512,27 @@ export function createApplicationLayer(
           try: () => adapters.repository.listArtifactActions(command),
           catch: (cause) => repositoryFailure("listArtifactActions", cause),
         }),
+      grantArtifactAccess: (command) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.grantArtifactAccess(command),
+          catch: (cause) => cause instanceof ArtifactNotFound
+            ? cause
+            : repositoryFailure("grantArtifactAccess", cause),
+        }),
+      revokeArtifactAccess: (command) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.revokeArtifactAccess(command),
+          catch: (cause) => cause instanceof ArtifactNotFound
+            ? cause
+            : repositoryFailure("revokeArtifactAccess", cause),
+        }),
+      listArtifactGrants: (projectId, artifactId) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.listArtifactGrants(projectId, artifactId),
+          catch: (cause) => cause instanceof ArtifactNotFound
+            ? cause
+            : repositoryFailure("listArtifactGrants", cause),
+        }),
       listArtifacts: (command) =>
         Effect.tryPromise({
           try: () => adapters.repository.listArtifacts(command),

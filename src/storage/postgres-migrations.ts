@@ -679,6 +679,26 @@ const addArtifactOwner = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+const addArtifactGrants = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    `CREATE TABLE artifact_grants (
+      installation_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      artifact_id TEXT NOT NULL,
+      principal_id TEXT NOT NULL,
+      granted_by_principal_id TEXT NOT NULL,
+      granted_at TEXT NOT NULL,
+      PRIMARY KEY (installation_id, artifact_id, principal_id),
+      FOREIGN KEY (installation_id, artifact_id)
+        REFERENCES artifacts(installation_id, id)
+    )`,
+    `CREATE INDEX artifact_grants_principal
+      ON artifact_grants (installation_id, principal_id, artifact_id)`,
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -692,10 +712,11 @@ const migrationLoader = Migrator.fromRecord({
   "0010_agent_capabilities": widenRegisteredAgentKind,
   "0011_artifact_search_name": addArtifactSearchName,
   "0012_artifact_owner": addArtifactOwner,
+  "0013_artifact_grants": addArtifactGrants,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 12;
+export const requiredPostgresSchemaVersion = 13;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {

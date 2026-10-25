@@ -30,6 +30,13 @@ export interface InstallationMember {
   readonly updatedAt: string;
 }
 
+/** What one member sees of another active member when sharing an artifact. */
+export interface MemberDirectoryEntry {
+  readonly displayName: string;
+  readonly email: string;
+  readonly id: string;
+}
+
 /** Identity information returned by a configured interactive-login provider. */
 export interface ExternalIdentity {
   readonly displayName: string;

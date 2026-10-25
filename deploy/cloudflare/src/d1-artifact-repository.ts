@@ -35,6 +35,7 @@ import {normalizeArtifactSearchText} from
 import {
   accessSettingSql,
   restrictedScopeParameters,
+  restrictedScopeSql,
   storedAccessSetting,
 } from "../../../src/storage/restricted-access-storage.js";
 import {
@@ -56,6 +57,7 @@ import {
   type ArtifactActionPage,
   type ArtifactActionRecord,
   type ArtifactDeletion,
+  type ArtifactGrant,
   type ArtifactPage,
   type ArtifactRecord,
   type ArtifactState,
@@ -82,6 +84,7 @@ import {
 } from "../../../src/core/model.js";
 import type {
   AgentDispatchRepository,
+  ArtifactGrantChange,
   ArtifactRepository,
   CancelAgentDispatch,
   ChangeArtifactAccessSetting,
@@ -103,6 +106,7 @@ import type {
   DeleteCommentThread,
   ExchangeContentBootstrap,
   ExpiredStagedUpload,
+  GrantArtifactAccess,
   ListAgentDispatches,
   ListArtifactActions,
   ListArtifacts,
@@ -115,6 +119,7 @@ import type {
   RegisterAgent,
   RenameProject,
   RestoreArtifactVersion,
+  RevokeArtifactAccess,
   SetProjectArchive,
   StagedUploadRepository,
   UpdateCommentReply,
@@ -292,6 +297,17 @@ const artifactListRowSchema = artifactRowSchema.extend({
   versionCount: z.coerce.number().int().positive(),
 });
 const tagRowSchema = z.object({artifactId: z.string(), tag: z.string()});
+const grantPrincipalRowSchema = z.object({
+  artifactId: z.string(),
+  principalId: z.string(),
+});
+const grantRowSchema = z.object({
+  artifactId: z.string(),
+  grantedAt: z.string(),
+  grantedByPrincipalId: z.string(),
+  principalId: z.string(),
+  projectId: z.string(),
+});
 const versionRowSchema = z.object({
   artifactId: z.string(),
   contentToken: z.string(),
@@ -697,12 +713,22 @@ export function createD1ArtifactRepository(
     `).bind(artifactId).all<z.input<typeof tagRowSchema>>();
     return result.results.map((row) => tagRowSchema.parse(row).tag);
   };
+  const readGrantedPrincipalIds = async (
+    artifactId: string,
+  ): Promise<readonly string[]> => {
+    const result = await database.prepare(`
+      SELECT artifact_id AS artifactId, principal_id AS principalId
+      FROM artifact_grants
+      WHERE artifact_id = ? ORDER BY granted_at, principal_id
+    `).bind(artifactId).all<z.input<typeof grantPrincipalRowSchema>>();
+    return result.results.map((row) => grantPrincipalRowSchema.parse(row).principalId);
+  };
   const readArtifactOrNull = async (
     projectId: string,
     artifactId: string,
     includeDeleted = false,
   ): Promise<ArtifactRecord | null> => {
-    const [artifactResult, tagsResult] = await database.batch([
+    const [artifactResult, tagsResult, grantsResult] = await database.batch([
       database.prepare(`${artifactSelect}
         WHERE project_id = ? AND id = ? ${includeDeleted ? "" : "AND deleted_at IS NULL"}
       `).bind(projectId, artifactId),
@@ -710,13 +736,20 @@ export function createD1ArtifactRepository(
         SELECT artifact_id AS artifactId, tag FROM artifact_tags
         WHERE artifact_id = ? ORDER BY tag
       `).bind(artifactId),
+      database.prepare(`
+        SELECT artifact_id AS artifactId, principal_id AS principalId
+        FROM artifact_grants
+        WHERE artifact_id = ? ORDER BY granted_at, principal_id
+      `).bind(artifactId),
     ]);
     const row = artifactResult?.results[0] ?? null;
     if (row === null) return null;
     const artifact = artifactRowSchema.parse(row);
     const tags = (tagsResult?.results ?? [])
       .map((tagRow) => tagRowSchema.parse(tagRow).tag);
-    return {...artifact, tags};
+    const grantedPrincipalIds = (grantsResult?.results ?? [])
+      .map((grantRow) => grantPrincipalRowSchema.parse(grantRow).principalId);
+    return {...artifact, grantedPrincipalIds, tags};
   };
   const readArtifact = async (
     projectId: string,
@@ -902,6 +935,28 @@ export function createD1ArtifactRepository(
     }
     return statements;
   };
+  // Records a change of who sees an artifact only when the statement just
+  // before it in the same batch changed exactly one grant row.
+  const conditionalActionStatement = (
+    command: GrantArtifactAccess | RevokeArtifactAccess,
+    versionId: string,
+  ) => database.prepare(`
+    INSERT INTO actions (
+      id, project_id, artifact_id, version_id, action, principal_id,
+      authorized_by_principal_id, idempotency_key, created_at
+    )
+    SELECT lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE changes() = 1
+  `).bind(
+    command.projectId,
+    command.artifactId,
+    versionId,
+    artifactActionKinds.changeAccess,
+    command.principalId,
+    command.authorizedByPrincipalId,
+    command.idempotencyKey,
+    command.createdAt,
+  );
   const actionStatement = (
     command: {
       readonly artifactId: string;
@@ -1411,7 +1466,7 @@ export function createD1ArtifactRepository(
       JOIN artifacts artifact ON artifact.id = thread.artifact_id
       WHERE thread.installation_id = ? AND thread.project_id = ?
         AND thread.id IN (${placeholders})
-        AND (artifact.restricted = 0 OR ? = 1 OR artifact.owner_principal_id = ?)
+        AND ${restrictedScopeSql("artifact")}
     `).bind(
       command.installationId,
       command.projectId,
@@ -2483,7 +2538,7 @@ export function createD1ArtifactRepository(
             ) AS versionCount
           FROM artifacts
           WHERE project_id = ? AND deleted_at IS NULL
-            AND (restricted = 0 OR ? = 1 OR owner_principal_id = ?)
+            AND ${restrictedScopeSql("artifacts")}
             AND (? IS NULL
               OR instr(search_name, ?) > 0
               OR EXISTS (
@@ -2513,7 +2568,10 @@ export function createD1ArtifactRepository(
       const parsed = result.results.map((row) => artifactListRowSchema.parse(row));
       const items = await Promise.all(
         parsed.slice(0, command.limit).map(async (artifact) =>
-          Object.assign({}, artifact, {tags: await readTags(artifact.id)})),
+          Object.assign({}, artifact, {
+            grantedPrincipalIds: await readGrantedPrincipalIds(artifact.id),
+            tags: await readTags(artifact.id),
+          })),
       );
       return pageResult(
         items,
@@ -2575,6 +2633,7 @@ export function createD1ArtifactRepository(
         currentVersionId: row.currentVersionId,
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
+        grantedPrincipalIds: await readGrantedPrincipalIds(row.artifactId),
         name: row.artifactName,
         ownerPrincipalId: row.ownerPrincipalId,
         projectId: row.projectId,
@@ -2659,17 +2718,22 @@ export function createD1ArtifactRepository(
       const artifact = await readArtifact(command.projectId, command.artifactId);
       assertCurrent(artifact, command.expectedCurrentVersionId);
       const stored = storedAccessSetting(command.accessSetting);
-      // Content opened by anyone but the owner stops serving in the same batch.
+      // Content opened by anyone but the owner and the members it is shared
+      // with stops serving in the same batch.
       const revocations = stored.restricted
         ? ["content_sessions", "content_bootstraps"].map((table) => database.prepare(`
           DELETE FROM ${table}
           WHERE project_id = ? AND artifact_id = ?
             AND (? IS NULL OR principal_id <> ?)
+            AND principal_id NOT IN (
+              SELECT principal_id FROM artifact_grants WHERE artifact_id = ?
+            )
         `).bind(
           command.projectId,
           command.artifactId,
           artifact.ownerPrincipalId,
           artifact.ownerPrincipalId,
+          command.artifactId,
         ))
         : [];
       return applyManagementMutation(command, artifactActionKinds.changeAccess, [
@@ -2785,6 +2849,85 @@ export function createD1ArtifactRepository(
           false,
           artifact.accessSetting,
         ));
+    },
+    grantArtifactAccess: async (
+      command: GrantArtifactAccess,
+    ): Promise<ArtifactGrantChange> => {
+      const artifact = await readArtifact(command.projectId, command.artifactId);
+      // One batch is one transaction: the action is recorded only when the
+      // grant row was new, and only while the artifact is still live.
+      const [inserted] = await database.batch([
+        database.prepare(`
+          INSERT INTO artifact_grants (
+            project_id, artifact_id, principal_id, granted_by_principal_id, granted_at
+          )
+          SELECT ?, ?, ?, ?, ?
+          WHERE EXISTS (
+            SELECT 1 FROM artifacts
+            WHERE project_id = ? AND id = ? AND deleted_at IS NULL
+          )
+          ON CONFLICT (artifact_id, principal_id) DO NOTHING
+        `).bind(
+          command.projectId,
+          artifact.id,
+          command.memberId,
+          command.principalId,
+          command.createdAt,
+          command.projectId,
+          artifact.id,
+        ),
+        conditionalActionStatement(command, artifact.currentVersionId),
+      ]);
+      return {changed: (inserted?.meta.changes ?? 0) === 1};
+    },
+    revokeArtifactAccess: async (
+      command: RevokeArtifactAccess,
+    ): Promise<ArtifactGrantChange> => {
+      const artifact = await readArtifact(command.projectId, command.artifactId);
+      // The member's open content stops serving in the same batch, and only
+      // while the grant being removed still exists.
+      const revocations = artifact.accessSetting === accessSettings.restricted
+        ? ["content_sessions", "content_bootstraps"].map((table) => database.prepare(`
+          DELETE FROM ${table}
+          WHERE project_id = ? AND artifact_id = ? AND principal_id = ?
+            AND EXISTS (
+              SELECT 1 FROM artifact_grants
+              WHERE artifact_id = ? AND principal_id = ?
+            )
+        `).bind(
+          command.projectId,
+          artifact.id,
+          command.memberId,
+          artifact.id,
+          command.memberId,
+        ))
+        : [];
+      const results = await database.batch([
+        ...revocations,
+        database.prepare(`
+          DELETE FROM artifact_grants
+          WHERE project_id = ? AND artifact_id = ? AND principal_id = ?
+        `).bind(command.projectId, artifact.id, command.memberId),
+        conditionalActionStatement(command, artifact.currentVersionId),
+      ]);
+      const removed = results[revocations.length];
+      return {changed: (removed?.meta.changes ?? 0) === 1};
+    },
+    listArtifactGrants: async (
+      projectId: string,
+      artifactId: string,
+    ): Promise<readonly ArtifactGrant[]> => {
+      const artifact = await readArtifact(projectId, artifactId);
+      const result = await database.prepare(`
+        SELECT project_id AS projectId, artifact_id AS artifactId,
+          principal_id AS principalId,
+          granted_by_principal_id AS grantedByPrincipalId,
+          granted_at AS grantedAt
+        FROM artifact_grants
+        WHERE project_id = ? AND artifact_id = ?
+        ORDER BY granted_at, principal_id
+      `).bind(projectId, artifact.id).all<z.input<typeof grantRowSchema>>();
+      return result.results.map((row) => grantRowSchema.parse(row));
     },
     deleteArtifact: async (command: DeleteArtifact) => {
       const existingRecord = await readIdempotency(command.projectId, command.idempotencyKey);

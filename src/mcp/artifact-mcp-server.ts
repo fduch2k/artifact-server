@@ -132,6 +132,7 @@ const artifactRecordSchema = z.object({
   createdAt: z.string(),
   ownerPrincipalId: z.string().nullable(),
   currentVersionId: z.string(),
+  grantedPrincipalIds: z.array(z.string()),
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
@@ -1293,7 +1294,7 @@ export function createArtifactMcpServer(
     {
       title: "Change artifact visibility",
       description:
-        "Change who can see an artifact without changing its saved files: restricted (only its owner and administrators), account_required (every signed-in member), or public_link. Only the owner or an administrator can switch to or from restricted. Public copies already downloaded outside Artifact Server cannot be recalled.",
+        "Change who can see an artifact without changing its saved files: restricted (only its owner, the members it is shared with, and administrators), account_required (every signed-in member), or public_link. Only the owner or an administrator can switch to or from restricted or choose the members it is shared with. Public copies already downloaded outside Artifact Server cannot be recalled.",
       inputSchema: z.object({
         accessSetting: accessSettingSchema,
         artifactId: artifactIdSchema,

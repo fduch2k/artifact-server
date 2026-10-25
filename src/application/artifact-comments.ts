@@ -14,7 +14,10 @@ import {
   type ProjectManagementFailure,
   ProjectManagementService,
 } from "./project-management.js";
-import {requireArtifactVisible} from "../core/artifact-visibility.js";
+import {
+  requireArtifactChangeable,
+  requireArtifactVisible,
+} from "../core/artifact-visibility.js";
 import {
   ArtifactNotFound,
   type ArtifactRepositoryFailure,
@@ -502,13 +505,18 @@ function makeArtifactCommentService(
     "ArtifactCommentService.requireCommentRemoval",
   )(function*(
     principal: Principal,
+    artifact: ArtifactRecord,
     author: CommentAuthor,
   ): Effect.fn.Return<CommentAuthor, AuthorizationDenied> {
     if (
       principal.id === author.principalId ||
-      isHumanAdministrator(principal) ||
-      hasCapability(principal, principalCapabilities.manageAnyArtifact)
+      isHumanAdministrator(principal)
     ) {
+      return author;
+    }
+    if (hasCapability(principal, principalCapabilities.manageAnyArtifact)) {
+      // Managing any artifact does not reach a restricted one only shared with you.
+      yield* requireArtifactChangeable(principal, artifact);
       return author;
     }
     return yield* new AuthorizationDenied({
@@ -670,7 +678,7 @@ function makeArtifactCommentService(
         artifact.id,
         command.threadId,
       );
-      yield* requireCommentRemoval(command.principal, thread.author);
+      yield* requireCommentRemoval(command.principal, artifact, thread.author);
       const deletedAt = DateTime.formatIso(yield* dependencies.clock.now);
       return yield* dependencies.repository.deleteThread({
         artifactId: artifact.id,
@@ -693,6 +701,8 @@ function makeArtifactCommentService(
       // the artifact-management capability (spec §2).
       yield* authorization.requireDispatchSend(command.principal);
       const artifact = yield* requireArtifact(command.principal, project.id, command.artifactId);
+      // Clearing everyone's threads is the owner's call on a restricted artifact.
+      yield* requireArtifactChangeable(command.principal, artifact);
       if (command.versionId !== null) {
         yield* requireVersion(project.id, artifact.id, command.versionId);
       }
@@ -782,7 +792,7 @@ function makeArtifactCommentService(
         command.threadId,
       );
       const reply = yield* requireReply(thread.id, command.replyId);
-      yield* requireCommentRemoval(command.principal, reply.author);
+      yield* requireCommentRemoval(command.principal, artifact, reply.author);
       const deletedAt = DateTime.formatIso(yield* dependencies.clock.now);
       yield* dependencies.repository.deleteReply({
         artifactId: artifact.id,

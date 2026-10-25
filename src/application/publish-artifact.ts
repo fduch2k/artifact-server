@@ -4,6 +4,7 @@ import { Context, DateTime, Effect, Layer, Schema } from "effect";
 
 import {
   mayChangeRestriction,
+  requireArtifactChangeable,
   requireArtifactVisible,
 } from "../core/artifact-visibility.js";
 import {
@@ -307,6 +308,8 @@ function makePublishArtifactService(
     yield* authorization.requireVersionPublication(
       command.principal,
     );
+    // Members a restricted artifact is shared with read it; they do not publish.
+    yield* requireArtifactChangeable(command.principal, current.artifact);
     const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
     const inputDigest = artifactVersionInputDigest({
       artifactId: command.artifactId,

@@ -16,12 +16,15 @@ import {
   type ProjectManagementFailure,
   ProjectManagementService,
 } from "./project-management.js";
+import { InstallationAccessService } from "./installation-access.js";
 import {
   ArtifactNotFound,
   type ArtifactMutationConflict,
   type ArtifactRepositoryFailure,
   AuthorizationDenied,
   type IdempotencyConflict,
+  type IdentityNotFound,
+  type IdentityRepositoryFailure,
   type InvalidArtifactTags,
   type InvalidIdempotencyKey,
   InvalidPagination,
@@ -29,6 +32,7 @@ import {
 } from "../core/errors.js";
 import {
   mayChangeRestriction,
+  requireArtifactChangeable,
   requireArtifactVisible,
   restrictedArtifactScope,
 } from "../core/artifact-visibility.js";
@@ -38,6 +42,7 @@ import {
   type AccessSetting,
   type ArtifactActionPage,
   type ArtifactDeletion,
+  type ArtifactGrant,
   type ArtifactPage,
   type ArtifactRecord,
   type ArtifactState,
@@ -46,12 +51,15 @@ import {
   type VersionRecord,
 } from "../core/model.js";
 import type {
+  ArtifactGrantChange,
   ChangeArtifactAccessSetting,
   ChangeArtifactTags,
   DeleteArtifact,
+  GrantArtifactAccess,
   ListArtifactActions,
   ListArtifacts,
   RestoreArtifactVersion,
+  RevokeArtifactAccess,
 } from "../core/ports.js";
 
 const maximumPageSize = 100;
@@ -116,6 +124,22 @@ export interface ListArtifactsCommand {
 export interface ListArtifactActionsCommand extends ReadArtifactCommand {
   readonly cursor: PageCursor | null;
   readonly limit: number;
+}
+
+/** Input for sharing one artifact with, or no longer with, one member. */
+export interface ChangeArtifactGrantCommand extends ReadArtifactCommand {
+  readonly idempotencyKey: string;
+  readonly memberId: string;
+}
+
+/** One member an artifact is shared with, as its owner or an administrator sees them. */
+export interface SharedMember {
+  /** Null when the member is no longer active; the grant stays until revoked. */
+  readonly displayName: string | null;
+  readonly email: string | null;
+  readonly grantedAt: string;
+  readonly grantedByPrincipalId: string;
+  readonly principalId: string;
 }
 
 /** Input for atomically tombstoning one artifact. */
@@ -186,6 +210,16 @@ export interface ArtifactManagementRepository {
     | VersionNotFound
     | ArtifactRepositoryFailure
   >;
+  readonly grantArtifactAccess: (
+    command: GrantArtifactAccess,
+  ) => Effect.Effect<ArtifactGrantChange, ArtifactNotFound | ArtifactRepositoryFailure>;
+  readonly revokeArtifactAccess: (
+    command: RevokeArtifactAccess,
+  ) => Effect.Effect<ArtifactGrantChange, ArtifactNotFound | ArtifactRepositoryFailure>;
+  readonly listArtifactGrants: (
+    projectId: string,
+    artifactId: string,
+  ) => Effect.Effect<readonly ArtifactGrant[], ArtifactNotFound | ArtifactRepositoryFailure>;
 }
 
 /** Dependencies used to construct artifact management operations. */
@@ -205,6 +239,8 @@ export type ArtifactManagementFailure =
   | InvalidPagination
   | AuthorizationDenied
   | ArtifactRepositoryFailure
+  | IdentityNotFound
+  | IdentityRepositoryFailure
   | ProjectManagementFailure;
 
 interface ArtifactManagementOperations {
@@ -238,6 +274,18 @@ interface ArtifactManagementOperations {
   readonly restoreVersion: (
     command: RestoreArtifactVersionCommand,
   ) => Effect.Effect<ArtifactState, ArtifactManagementFailure>;
+  /** Share an artifact with one more active member; repeating it changes nothing. */
+  readonly grantAccess: (
+    command: ChangeArtifactGrantCommand,
+  ) => Effect.Effect<ArtifactGrantChange, ArtifactManagementFailure>;
+  /** Stop sharing an artifact with one member; repeating it changes nothing. */
+  readonly revokeAccess: (
+    command: ChangeArtifactGrantCommand,
+  ) => Effect.Effect<ArtifactGrantChange, ArtifactManagementFailure>;
+  /** The members an artifact is shared with, for its owner or an administrator. */
+  readonly listSharedMembers: (
+    command: ReadArtifactCommand,
+  ) => Effect.Effect<readonly SharedMember[], ArtifactManagementFailure>;
 }
 
 /** Reads and mutates artifact metadata without changing committed versions. */
@@ -251,16 +299,18 @@ export class ArtifactManagementService extends Context.Service<
   ): Layer.Layer<
     ArtifactManagementService,
     never,
-    AuthorizationService | ProjectManagementService
+    AuthorizationService | InstallationAccessService | ProjectManagementService
   > =>
     Layer.effect(
       ArtifactManagementService,
       Effect.gen(function*() {
         const authorization = yield* AuthorizationService;
+        const members = yield* InstallationAccessService;
         const projects = yield* ProjectManagementService;
         return makeArtifactManagementService(
           dependencies,
           authorization,
+          members,
           projects,
         );
       }),
@@ -276,6 +326,7 @@ function normalizeArtifactSearch(candidate: string | null): string | null {
 function makeArtifactManagementService(
   dependencies: ArtifactManagementDependencies,
   authorization: AuthorizationOperations,
+  members: InstallationAccessService["Service"],
   projects: ProjectManagementService["Service"],
 ): ArtifactManagementOperations {
   const resolveProjectForRead = Effect.fn(
@@ -466,6 +517,7 @@ function makeArtifactManagementService(
     );
     yield* requireArtifactVisible(command.principal, artifact);
     yield* authorization.requireArtifactManagement(command.principal);
+    yield* requireArtifactChangeable(command.principal, artifact);
     return yield* dependencies.repository.listArtifactActions({
       artifactId: artifact.id,
       cursor: command.cursor,
@@ -483,6 +535,7 @@ function makeArtifactManagementService(
       const artifact = yield* requireArtifact(project.id, command.artifactId);
       yield* requireArtifactVisible(command.principal, artifact);
       yield* authorization.requireArtifactManagement(command.principal);
+      yield* requireArtifactChangeable(command.principal, artifact);
       yield* requireVersion(project.id, artifact.id, command.versionId);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
@@ -558,6 +611,7 @@ function makeArtifactManagementService(
       const artifact = yield* requireArtifact(project.id, command.artifactId);
       yield* requireArtifactVisible(command.principal, artifact);
       yield* authorization.requireArtifactManagement(command.principal);
+      yield* requireArtifactChangeable(command.principal, artifact);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const tags = yield* parseArtifactTags(command.tags);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
@@ -594,6 +648,7 @@ function makeArtifactManagementService(
       );
       yield* requireArtifactVisible(command.principal, artifact);
       yield* authorization.requireArtifactManagement(command.principal);
+      yield* requireArtifactChangeable(command.principal, artifact);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
       return yield* dependencies.repository.deleteArtifact({
@@ -616,6 +671,95 @@ function makeArtifactManagementService(
     },
   );
 
+  // Choosing who sees an artifact is the owner's or an administrator's call,
+  // through a person's own session or a key with the management capability.
+  const requireSharingAuthority = Effect.fn(
+    "ArtifactManagementService.requireSharingAuthority",
+  )(function*(principal: Principal, artifact: ArtifactRecord) {
+    yield* authorization.requireArtifactManagement(principal);
+    if (mayChangeRestriction(principal, artifact)) return;
+    yield* Effect.fail(new AuthorizationDenied({
+      message: "Only the owner or an administrator can change who sees this artifact.",
+    }));
+  });
+
+  const grantAccess = Effect.fn("ArtifactManagementService.grantAccess")(
+    function*(command: ChangeArtifactGrantCommand) {
+      const project = yield* resolveProjectForRead(
+        command.principal,
+        command.projectId,
+      );
+      const artifact = yield* requireArtifact(project.id, command.artifactId);
+      yield* requireArtifactVisible(command.principal, artifact);
+      yield* requireSharingAuthority(command.principal, artifact);
+      const member = yield* members.findActiveMember(command.memberId);
+      const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
+      // The owner already sees the artifact; a grant would only clutter the list.
+      if (member.id === artifact.ownerPrincipalId) return {changed: false};
+      const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
+      return yield* dependencies.repository.grantArtifactAccess({
+        artifactId: artifact.id,
+        authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
+        createdAt,
+        idempotencyKey,
+        memberId: member.id,
+        principalId: command.principal.id,
+        projectId: project.id,
+      });
+    },
+  );
+
+  const revokeAccess = Effect.fn("ArtifactManagementService.revokeAccess")(
+    function*(command: ChangeArtifactGrantCommand) {
+      const project = yield* resolveProjectForRead(
+        command.principal,
+        command.projectId,
+      );
+      const artifact = yield* requireArtifact(project.id, command.artifactId);
+      yield* requireArtifactVisible(command.principal, artifact);
+      yield* requireSharingAuthority(command.principal, artifact);
+      const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
+      const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
+      // A deactivated member can still be removed, so no membership check here.
+      return yield* dependencies.repository.revokeArtifactAccess({
+        artifactId: artifact.id,
+        authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
+        createdAt,
+        idempotencyKey,
+        memberId: command.memberId,
+        principalId: command.principal.id,
+        projectId: project.id,
+      });
+    },
+  );
+
+  const listSharedMembers = Effect.fn(
+    "ArtifactManagementService.listSharedMembers",
+  )(function*(command: ReadArtifactCommand) {
+    const project = yield* resolveProjectForRead(
+      command.principal,
+      command.projectId,
+    );
+    const artifact = yield* requireArtifact(project.id, command.artifactId);
+    yield* requireArtifactVisible(command.principal, artifact);
+    yield* requireSharingAuthority(command.principal, artifact);
+    const [grants, directory] = yield* Effect.all([
+      dependencies.repository.listArtifactGrants(project.id, artifact.id),
+      members.listMemberDirectory(command.principal),
+    ]);
+    const activeMembers = new Map(directory.map((entry) => [entry.id, entry]));
+    return grants.map((grant): SharedMember => {
+      const member = activeMembers.get(grant.principalId);
+      return {
+        displayName: member?.displayName ?? null,
+        email: member?.email ?? null,
+        grantedAt: grant.grantedAt,
+        grantedByPrincipalId: grant.grantedByPrincipalId,
+        principalId: grant.principalId,
+      };
+    });
+  });
+
   return ArtifactManagementService.of({
     changeAccess,
     changeTags,
@@ -623,10 +767,13 @@ function makeArtifactManagementService(
     getArtifact,
     getVersion,
     getVersionDetails,
+    grantAccess,
     listArtifactActions,
     listArtifacts,
+    listSharedMembers,
     listVersions,
     restoreVersion,
+    revokeAccess,
   });
 }
 

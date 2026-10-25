@@ -6,6 +6,7 @@ import type {
   AgentDispatchState,
   ArtifactActionPage,
   ArtifactDeletion,
+  ArtifactGrant,
   ArtifactPage,
   ArtifactState,
   ArtifactVersion,
@@ -184,11 +185,45 @@ export interface DeleteArtifact {
   readonly projectId: string;
 }
 
-/** Restricted artifacts one reader may list: every one, those it owns, or none. */
+/**
+ * Restricted artifacts one reader may list: every one, those a member owns or
+ * was granted, or none.
+ */
 export type RestrictedArtifactScope =
   | {readonly kind: "all"}
   | {readonly kind: "none"}
-  | {readonly kind: "owned"; readonly principalId: string};
+  | {readonly kind: "member"; readonly principalId: string};
+
+/** Values used to share one restricted artifact with one more member. */
+export interface GrantArtifactAccess {
+  readonly artifactId: string;
+  readonly authorizedByPrincipalId: string | null;
+  readonly createdAt: string;
+  readonly idempotencyKey: string;
+  /** Member that receives access. */
+  readonly memberId: string;
+  /** Principal that grants access and is recorded on the action. */
+  readonly principalId: string;
+  readonly projectId: string;
+}
+
+/** Values used to stop sharing one restricted artifact with one member. */
+export interface RevokeArtifactAccess {
+  readonly artifactId: string;
+  readonly authorizedByPrincipalId: string | null;
+  readonly createdAt: string;
+  readonly idempotencyKey: string;
+  /** Member that loses access. */
+  readonly memberId: string;
+  /** Principal that revokes access and is recorded on the action. */
+  readonly principalId: string;
+  readonly projectId: string;
+}
+
+/** Whether one grant or revocation changed the stored member list. */
+export interface ArtifactGrantChange {
+  readonly changed: boolean;
+}
 
 /** Values used to read one bounded page of active artifacts. */
 export interface ListArtifacts {
@@ -639,6 +674,15 @@ export interface ArtifactRepository {
   changeAccessSetting(command: ChangeArtifactAccessSetting): Promise<ArtifactState>;
   changeTags(command: ChangeArtifactTags): Promise<ArtifactState>;
   deleteArtifact(command: DeleteArtifact): Promise<ArtifactDeletion>;
+  /** Share a live artifact with one member; repeating a grant changes nothing. */
+  grantArtifactAccess(command: GrantArtifactAccess): Promise<ArtifactGrantChange>;
+  /** Stop sharing with one member and end that member's open content access. */
+  revokeArtifactAccess(command: RevokeArtifactAccess): Promise<ArtifactGrantChange>;
+  /** The members a live artifact is shared with, oldest grant first. */
+  listArtifactGrants(
+    projectId: string,
+    artifactId: string,
+  ): Promise<readonly ArtifactGrant[]>;
   findArtifact(projectId: string, artifactId: string): Promise<ArtifactRecord | null>;
   findArtifactForAdministration(
     projectId: string,

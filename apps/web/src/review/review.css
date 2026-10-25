@@ -2115,6 +2115,94 @@ select:focus-visible {
   margin-top: 0.8rem;
 }
 
+.as-share-people {
+  border: 1px solid var(--as-border);
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem;
+}
+
+.as-share-people__chosen,
+.as-share-people__suggestions {
+  display: grid;
+  gap: 0.3rem;
+  list-style: none;
+  margin: 0;
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.as-share-people__chosen li {
+  align-items: center;
+  background: var(--as-surface-raised);
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0.3rem 0.3rem 0.3rem 0.55rem;
+}
+
+.as-share-people__chosen span,
+.as-share-people__suggestions button {
+  display: grid;
+  min-width: 0;
+}
+
+.as-share-people strong,
+.as-share-people small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.as-share-people strong {
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.as-share-people small,
+.as-share-people__empty,
+.as-share-people__note {
+  color: var(--as-subtle);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.as-share-people__search {
+  background: var(--as-canvas);
+  border: 1px solid var(--as-border);
+  color: var(--as-text);
+  font: inherit;
+  font-size: 0.76rem;
+  min-height: 2rem;
+  padding: 0.35rem 0.55rem;
+  width: 100%;
+}
+
+.as-share-people__search:focus-visible {
+  outline: 1px solid var(--as-iris);
+  outline-offset: 1px;
+}
+
+.as-share-people__suggestions button {
+  background: none;
+  border: 1px solid transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+  width: 100%;
+}
+
+.as-share-people__suggestions button:hover,
+.as-share-people__suggestions button:focus-visible {
+  background: var(--as-iris-soft);
+  border-color: color-mix(in oklab, var(--as-iris) 62%, var(--as-border));
+  outline: none;
+}
+
 .as-preview-panel__body {
   background:
     linear-gradient(var(--as-border) 1px, transparent 1px),

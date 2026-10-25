@@ -50,6 +50,7 @@ import {
   type ArtifactActionPage,
   type ArtifactActionRecord,
   type ArtifactDeletion,
+  type ArtifactGrant,
   type ArtifactPage,
   type ArtifactRecord,
   type ArtifactState,
@@ -79,6 +80,7 @@ import {
 } from "../core/model.js";
 import type {
   AgentDispatchRepository,
+  ArtifactGrantChange,
   ArtifactRepository,
   CancelAgentDispatch,
   ChangeArtifactAccessSetting,
@@ -101,6 +103,7 @@ import type {
   DeleteCommentThread,
   ExchangeContentBootstrap,
   ExpiredStagedUpload,
+  GrantArtifactAccess,
   ListAgentDispatches,
   ListArtifactActions,
   ListArtifacts,
@@ -117,6 +120,7 @@ import type {
   ProjectRepository,
   RenameProject,
   RestoreArtifactVersion,
+  RevokeArtifactAccess,
   SetProjectArchive,
   SourceBindingRepository,
   SourceBindingWrite,
@@ -150,6 +154,7 @@ import {
 import {
   accessSettingSql,
   restrictedScopeParameters,
+  restrictedScopeSql,
   storedAccessSetting,
 } from "./restricted-access-storage.js";
 import {
@@ -272,6 +277,17 @@ const artifactListRowSchema = artifactRowSchema.extend({
 const artifactTagRowSchema = z.object({
   artifactId: z.string(),
   tag: z.string(),
+});
+const artifactGrantPrincipalRowSchema = z.object({
+  artifactId: z.string(),
+  principalId: z.string(),
+});
+const artifactGrantRowSchema = z.object({
+  artifactId: z.string(),
+  grantedAt: z.string(),
+  grantedByPrincipalId: z.string(),
+  principalId: z.string(),
+  projectId: z.string(),
 });
 const versionRowSchema = z.object({
   artifactId: z.string(),
@@ -1617,7 +1633,7 @@ export class SqliteArtifactRepository implements
           throw changedDuringManagement();
         }
         if (stored.restricted) {
-          this.#revokeContentAccessExceptOwner(artifact);
+          this.#revokeContentAccessExceptOwnerAndGrantees(artifact);
         }
         this.#insertAction(
           command.projectId,
@@ -1758,6 +1774,92 @@ export class SqliteArtifactRepository implements
     );
   }
 
+  grantArtifactAccess(command: GrantArtifactAccess): Promise<ArtifactGrantChange> {
+    return Promise.resolve().then(() =>
+      this.#transaction(() => {
+        const artifact = this.#readArtifact(command.projectId, command.artifactId);
+        const inserted = this.#database
+          .prepare(
+            `INSERT INTO artifact_grants (
+              project_id, artifact_id, principal_id, granted_by_principal_id, granted_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (artifact_id, principal_id) DO NOTHING`,
+          )
+          .run(
+            command.projectId,
+            artifact.id,
+            command.memberId,
+            command.principalId,
+            command.createdAt,
+          );
+        if (inserted.changes !== 1) return {changed: false};
+        this.#insertAction(
+          command.projectId,
+          artifact.id,
+          artifact.currentVersionId,
+          command.idempotencyKey,
+          command.createdAt,
+          artifactActionKinds.changeAccess,
+          command.principalId,
+          command.authorizedByPrincipalId,
+        );
+        return {changed: true};
+      }),
+    );
+  }
+
+  revokeArtifactAccess(command: RevokeArtifactAccess): Promise<ArtifactGrantChange> {
+    return Promise.resolve().then(() =>
+      this.#transaction(() => {
+        const artifact = this.#readArtifact(command.projectId, command.artifactId);
+        const removed = this.#database
+          .prepare(
+            `DELETE FROM artifact_grants
+             WHERE project_id = ? AND artifact_id = ? AND principal_id = ?`,
+          )
+          .run(command.projectId, artifact.id, command.memberId);
+        if (removed.changes !== 1) return {changed: false};
+        if (artifact.accessSetting === accessSettings.restricted) {
+          this.#revokeContentAccessOf(artifact, command.memberId);
+        }
+        this.#insertAction(
+          command.projectId,
+          artifact.id,
+          artifact.currentVersionId,
+          command.idempotencyKey,
+          command.createdAt,
+          artifactActionKinds.changeAccess,
+          command.principalId,
+          command.authorizedByPrincipalId,
+        );
+        return {changed: true};
+      }),
+    );
+  }
+
+  listArtifactGrants(
+    projectId: string,
+    artifactId: string,
+  ): Promise<readonly ArtifactGrant[]> {
+    return Promise.resolve().then(() => {
+      const artifact = this.#readArtifact(projectId, artifactId);
+      const rows = this.#database
+        .prepare(
+          `SELECT
+            project_id AS projectId,
+            artifact_id AS artifactId,
+            principal_id AS principalId,
+            granted_by_principal_id AS grantedByPrincipalId,
+            granted_at AS grantedAt
+           FROM artifact_grants
+           WHERE project_id = ? AND artifact_id = ?
+           ORDER BY granted_at, principal_id`,
+        )
+        .all(projectId, artifact.id);
+      return z.array(artifactGrantRowSchema).parse(rows);
+    });
+  }
+
   findArtifact(projectId: string, artifactId: string): Promise<ArtifactRecord | null> {
     return Promise.resolve().then(() => this.#readArtifactOrNull(projectId, artifactId));
   }
@@ -1895,7 +1997,7 @@ export class SqliteArtifactRepository implements
             FROM artifacts
             WHERE project_id = ?
               AND deleted_at IS NULL
-              AND (restricted = 0 OR ? = 1 OR owner_principal_id = ?)
+              AND ${restrictedScopeSql("artifacts")}
               AND (
                 ? IS NULL
                 OR instr(search_name, ?) > 0
@@ -1930,7 +2032,7 @@ export class SqliteArtifactRepository implements
           command.limit + 1,
       );
       return pageFromRows(
-        this.#withTagsForArtifacts(z.array(artifactListRowSchema).parse(rows)),
+        this.#withTagsAndGrantsForArtifacts(z.array(artifactListRowSchema).parse(rows)),
         command.limit,
         command.sort === "comments" ? ({commentCount}) => commentCount : null,
       );
@@ -1989,7 +2091,7 @@ export class SqliteArtifactRepository implements
           command.limit + 1,
         );
       const parsedRows = z.array(publicLinkInventoryRowSchema).parse(rows);
-      const artifacts = this.#withTagsForArtifacts(parsedRows.map((row) => ({
+      const artifacts = this.#withTagsAndGrantsForArtifacts(parsedRows.map((row) => ({
         accessSetting: row.accessSetting,
         createdAt: row.artifactCreatedAt,
         currentVersionId: row.currentVersionId,
@@ -2688,7 +2790,7 @@ export class SqliteArtifactRepository implements
       )
       .get(projectId, artifactId);
     const artifact = artifactRowSchema.nullable().parse(row ?? null);
-    return artifact === null ? null : this.#withTags(artifact);
+    return artifact === null ? null : this.#withTagsAndGrants(artifact);
   }
 
   #readArtifactIncludingDeletedOrNull(
@@ -2711,20 +2813,29 @@ export class SqliteArtifactRepository implements
       )
       .get(projectId, artifactId);
     const artifact = artifactRowSchema.nullable().parse(row ?? null);
-    return artifact === null ? null : this.#withTags(artifact);
+    return artifact === null ? null : this.#withTagsAndGrants(artifact);
   }
 
-  #withTags(artifact: z.infer<typeof artifactRowSchema>): ArtifactRecord {
-    return {...artifact, tags: this.#readTags(artifact.id)};
+  #withTagsAndGrants(artifact: z.infer<typeof artifactRowSchema>): ArtifactRecord {
+    return {
+      ...artifact,
+      grantedPrincipalIds: this.#readGrantedPrincipalIds(artifact.id),
+      tags: this.#readTags(artifact.id),
+    };
   }
 
-  #withTagsForArtifacts<Artifact extends z.infer<typeof artifactRowSchema>>(
+  #withTagsAndGrantsForArtifacts<Artifact extends z.infer<typeof artifactRowSchema>>(
     artifacts: readonly Artifact[],
-  ): readonly (Artifact & Pick<ArtifactRecord, "tags">)[] {
+  ): readonly (Artifact & Pick<ArtifactRecord, "grantedPrincipalIds" | "tags">)[] {
     if (artifacts.length === 0) return [];
     const tagsByArtifact = new Map<string, string[]>();
-    for (const artifact of artifacts) tagsByArtifact.set(artifact.id, []);
+    const grantsByArtifact = new Map<string, string[]>();
+    for (const artifact of artifacts) {
+      tagsByArtifact.set(artifact.id, []);
+      grantsByArtifact.set(artifact.id, []);
+    }
     const placeholders = artifacts.map(() => "?").join(", ");
+    const artifactIds = artifacts.map((artifact) => artifact.id);
     const rows = this.#database
       .prepare(
         `SELECT artifact_id AS artifactId, tag
@@ -2732,14 +2843,39 @@ export class SqliteArtifactRepository implements
          WHERE artifact_id IN (${placeholders})
          ORDER BY artifact_id, tag`,
       )
-      .all(...artifacts.map((artifact) => artifact.id));
+      .all(...artifactIds);
     for (const row of z.array(artifactTagRowSchema).parse(rows)) {
       tagsByArtifact.get(row.artifactId)?.push(row.tag);
     }
+    const grantRows = this.#database
+      .prepare(
+        `SELECT artifact_id AS artifactId, principal_id AS principalId
+         FROM artifact_grants
+         WHERE artifact_id IN (${placeholders})
+         ORDER BY artifact_id, granted_at, principal_id`,
+      )
+      .all(...artifactIds);
+    for (const row of z.array(artifactGrantPrincipalRowSchema).parse(grantRows)) {
+      grantsByArtifact.get(row.artifactId)?.push(row.principalId);
+    }
     return artifacts.map((artifact) => ({
       ...artifact,
+      grantedPrincipalIds: grantsByArtifact.get(artifact.id) ?? [],
       tags: tagsByArtifact.get(artifact.id) ?? [],
     }));
+  }
+
+  #readGrantedPrincipalIds(artifactId: string): readonly string[] {
+    const rows = this.#database
+      .prepare(
+        `SELECT artifact_id AS artifactId, principal_id AS principalId
+         FROM artifact_grants
+         WHERE artifact_id = ?
+         ORDER BY granted_at, principal_id`,
+      )
+      .all(artifactId);
+    return z.array(artifactGrantPrincipalRowSchema).parse(rows)
+      .map((row) => row.principalId);
   }
 
   #readTags(artifactId: string): readonly string[] {
@@ -3904,7 +4040,7 @@ export class SqliteArtifactRepository implements
            FROM comment_threads thread
            JOIN artifacts artifact ON artifact.id = thread.artifact_id
            WHERE thread.id = ? AND thread.installation_id = ? AND thread.project_id = ?
-             AND (artifact.restricted = 0 OR ? = 1 OR artifact.owner_principal_id = ?)`,
+             AND ${restrictedScopeSql("artifact")}`,
         );
         const restrictedScope = restrictedScopeParameters(command.restrictedScope);
         for (const threadId of command.threadIds) {
@@ -4934,6 +5070,7 @@ export class SqliteArtifactRepository implements
     this.#addSourceBindingColumnsIfMissing();
     this.#addGitHistoryMirrorTablesIfMissing();
     this.#addArtifactOwnerIfMissing();
+    this.#addArtifactGrantsIfMissing();
     this.#database.exec(`
       CREATE INDEX IF NOT EXISTS projects_active_created
         ON projects (archived_at, created_at, id);
@@ -4941,22 +5078,57 @@ export class SqliteArtifactRepository implements
     this.#database.exec(`PRAGMA user_version = ${requiredSqliteSchemaVersion};`);
   }
 
-  /** End every content session and bootstrap of an artifact not held by its owner. */
-  #revokeContentAccessExceptOwner(artifact: ArtifactRecord): void {
+  /**
+   * End every content session and bootstrap of an artifact not held by its
+   * owner or a member it is shared with.
+   */
+  #revokeContentAccessExceptOwnerAndGrantees(artifact: ArtifactRecord): void {
     for (const table of ["content_sessions", "content_bootstraps"] as const) {
       this.#database
         .prepare(
           `DELETE FROM ${table}
            WHERE project_id = ? AND artifact_id = ?
-             AND (? IS NULL OR principal_id <> ?)`,
+             AND (? IS NULL OR principal_id <> ?)
+             AND principal_id NOT IN (
+               SELECT principal_id FROM artifact_grants WHERE artifact_id = ?
+             )`,
         )
         .run(
           artifact.projectId,
           artifact.id,
           artifact.ownerPrincipalId,
           artifact.ownerPrincipalId,
+          artifact.id,
         );
     }
+  }
+
+  /** End one member's content sessions and bootstraps of one artifact. */
+  #revokeContentAccessOf(artifact: ArtifactRecord, principalId: string): void {
+    for (const table of ["content_sessions", "content_bootstraps"] as const) {
+      this.#database
+        .prepare(
+          `DELETE FROM ${table}
+           WHERE project_id = ? AND artifact_id = ? AND principal_id = ?`,
+        )
+        .run(artifact.projectId, artifact.id, principalId);
+    }
+  }
+
+  /** Keep the members each restricted artifact is shared with. */
+  #addArtifactGrantsIfMissing(): void {
+    this.#database.exec(`
+      CREATE TABLE IF NOT EXISTS artifact_grants (
+        project_id TEXT NOT NULL REFERENCES projects(id),
+        artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+        principal_id TEXT NOT NULL,
+        granted_by_principal_id TEXT NOT NULL,
+        granted_at TEXT NOT NULL,
+        PRIMARY KEY (artifact_id, principal_id)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS artifact_grants_principal
+        ON artifact_grants (principal_id, artifact_id);
+    `);
   }
 
   /** Record artifact owners and the restricted flag, backfilling owners from version 1. */
@@ -5692,6 +5864,7 @@ export class SqliteArtifactRepository implements
       deletedAt: parsed.artifactDeletedAt,
       id: parsed.artifactId,
       name: parsed.artifactName,
+      grantedPrincipalIds: this.#readGrantedPrincipalIds(parsed.artifactId),
       ownerPrincipalId: parsed.ownerPrincipalId,
       projectId: parsed.projectId,
       tags: this.#readTags(parsed.artifactId),

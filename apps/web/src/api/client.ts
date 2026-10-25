@@ -133,11 +133,20 @@ const artifactSchema = z.object({
   ownerPrincipalId: z.string().nullable(),
   currentVersionId: z.string(),
   deletedAt: z.string().nullable(),
+  grantedPrincipalIds: z.array(z.string()),
   id: z.string(),
   name: z.string(),
   projectId: z.string(),
   tags: z.array(z.string()),
 });
+
+const memberDirectoryEntrySchema = z.object({
+  displayName: z.string(),
+  email: z.string(),
+  id: z.string(),
+});
+
+const grantChangeSchema = z.object({ changed: z.boolean() });
 
 const manifestEntrySchema = z.object({
   disposition: z.enum(["attachment", "inline"]),
@@ -201,6 +210,7 @@ export type Project = z.infer<typeof projectSchema>;
 export type ProjectGitHistorySetting = z.infer<typeof projectGitHistorySettingSchema>;
 export type ProjectGitHistoryEstimate = z.infer<typeof projectGitHistoryEstimateSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
+export type MemberDirectoryEntry = z.infer<typeof memberDirectoryEntrySchema>;
 export type ManifestEntry = z.infer<typeof manifestEntrySchema>;
 export type Version = z.infer<typeof versionSchema>;
 export type Manifest = z.infer<typeof manifestSchema>;
@@ -1310,6 +1320,30 @@ export const api = {
     z.object({ members: z.array(memberSchema) }),
     "/api/v1/members",
   ).then(({ members }) => members),
+  memberDirectory: () => request(
+    z.object({ members: z.array(memberDirectoryEntrySchema) }),
+    "/api/v1/member-directory",
+  ).then(({ members }) => members),
+  grantAccess: (
+    projectId: string,
+    artifactId: string,
+    memberId: string,
+    idempotencyKey: string,
+  ) => request(
+    grantChangeSchema,
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/grants/${encodeURIComponent(memberId)}?${projectQuery(projectId)}`,
+    { headers: mutationHeaders(idempotencyKey), method: "PUT" },
+  ),
+  revokeAccess: (
+    projectId: string,
+    artifactId: string,
+    memberId: string,
+    idempotencyKey: string,
+  ) => request(
+    grantChangeSchema,
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/grants/${encodeURIComponent(memberId)}?${projectQuery(projectId)}`,
+    { headers: mutationHeaders(idempotencyKey), method: "DELETE" },
+  ),
   admitMember: (
     displayName: string,
     email: string,

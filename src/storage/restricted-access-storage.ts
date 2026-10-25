@@ -34,11 +34,28 @@ export function accessSettingSql(
   return `CASE WHEN ${flag} THEN '${accessSettings.restricted}' ELSE ${prefix}access_setting END`;
 }
 
-/** Bind values for `(restricted = 0 OR ? = 1 OR owner_principal_id = ?)`. */
+/**
+ * SQL that keeps an artifact row its reader may see. Bind
+ * `restrictedScopeParameters` to the placeholders in order.
+ */
+export function restrictedScopeSql(
+  alias: string,
+  placeholders: readonly [string, string, string] = ["?", "?", "?"],
+): string {
+  const [all, owner, grantee] = placeholders;
+  return `(${alias}.restricted = 0 OR ${all} = 1 OR ${alias}.owner_principal_id = ${owner}
+    OR EXISTS (
+      SELECT 1 FROM artifact_grants access_grant
+      WHERE access_grant.artifact_id = ${alias}.id
+        AND access_grant.principal_id = ${grantee}
+    ))`;
+}
+
+/** Bind values for `restrictedScopeSql`: everything, one member's, or nothing. */
 export function restrictedScopeParameters(
   scope: RestrictedArtifactScope,
-): readonly [number, string | null] {
-  if (scope.kind === "all") return [1, null];
-  if (scope.kind === "owned") return [0, scope.principalId];
-  return [0, null];
+): readonly [number, string | null, string | null] {
+  if (scope.kind === "all") return [1, null, null];
+  if (scope.kind === "member") return [0, scope.principalId, scope.principalId];
+  return [0, null, null];
 }

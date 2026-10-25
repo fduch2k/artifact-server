@@ -185,6 +185,7 @@ function artifactFixture(): ArtifactRecord {
     createdAt: "2026-08-13T00:00:00.000Z",
     currentVersionId: "version-1",
     deletedAt: null,
+    grantedPrincipalIds: [],
     id: "artifact-1",
     name: "Authorization fixture",
     ownerPrincipalId: "member-owner",
