@@ -2017,11 +2017,12 @@
                 <h3>3. Restricted</h3>
                 <p>
                   Only the artifact's owner, the person who created it, and the installation's
-                  administrators can find, open, or manage it. Other members and service
-                  principals do not see it in lists or search, and a direct request answers as if
-                  it did not exist. Only the owner or an administrator can switch an artifact to or
-                  from restricted, and the switch ends other people's open content sessions at
-                  once.
+                  administrators can find, open, or manage it. The owner or an administrator may
+                  share it with named members, who can then find, open, and comment on it but not
+                  change it. Other members and service principals do not see it in lists or
+                  search, and a direct request answers as if it did not exist. Only the owner or an
+                  administrator can switch an artifact to or from restricted or choose who it is
+                  shared with, and the switch ends other people's open content sessions at once.
                 </p>
               </div>
             </article>
@@ -3813,7 +3814,7 @@ artifact_delete</code></pre>
                 <li>Saved versions that never change, plus the ability to restore an earlier one.</li>
                 <li>File and text comparisons between any two saved versions.</li>
                 <li>Optional private Git handoff, off by default and selected by explicit installation configuration.</li>
-                <li>Three access settings: account required, public link, and restricted to the owner and administrators.</li>
+                <li>Three access settings: account required, public link, and restricted to the owner, the members the owner shares it with, and administrators.</li>
                 <li>Browser access, MCP, the Artifact Server command-line program, and normal web requests from software.</li>
                 <li>An optional connection from one Artifact Server installation to one Plannotator organization, including signed operation requests and temporary browser sessions.</li>
                 <li>An explicit Plannotator review response that may add a credential-free review bridge without changing the stored artifact.</li>
@@ -3976,7 +3977,7 @@ artifact_delete</code></pre>
             <article class="decision-item"><p>An artifact may have up to 20 normalized tags for exact filtering. Tags belong to the artifact, persist across version changes and tombstones, and are replaced through one authorized, idempotent, audited operation. The first release has no tag hierarchy or per-version tags.</p></article>
             <article class="decision-item"><p>Comparisons use canonical manifests and changed text. Binary comparison shows metadata and links. Git is not required.</p></article>
             <article class="decision-item"><p>Git handoff is an optional private copy that is off by default and never selected automatically. Configuring Cloudflare Artifacts makes it available but copies nothing until an administrator estimates and enables selected projects or explicitly selects all projects. Each artifact has its own repository. The normal object store remains authoritative, and Git failure or a copy budget never blocks or loses a saved version.</p></article>
-            <article class="decision-item"><p>Account required, public link, and restricted are the read settings. A public link opens only the current version; history and comparisons still require an account. A restricted artifact is visible to and manageable by only its owner and administrators. Every admitted human member may manage the other project artifacts; services require explicit capabilities.</p></article>
+            <article class="decision-item"><p>Account required, public link, and restricted are the read settings. A public link opens only the current version; history and comparisons still require an account. A restricted artifact is visible to only its owner, the members the owner shares it with, and administrators, and manageable by only its owner and administrators. Every admitted human member may manage the other project artifacts; services require explicit capabilities.</p></article>
             <article class="decision-item"><p>One installation represents one person, team, or company and contains projects. Every artifact belongs to one project. A new installation creates a default project. There is no organization switcher or separate Artifact Store object.</p></article>
             <article class="decision-item"><p>Projects use installation membership and have no separate member list or access-control list in the first release. Project identity is enforced by storage, authorization, HTTP, MCP, browser sessions, audit, backup, and restore.</p></article>
             <article class="decision-item"><p>One Artifact Server installation may connect to one Plannotator organization. Each Plannotator project pairs with one Artifact Server project. Workspaces reference project artifacts and versions; they do not own artifact storage.</p></article>

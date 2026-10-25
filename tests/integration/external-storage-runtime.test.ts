@@ -2019,7 +2019,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     await server.stop();
   });
 
-  test("external-storage foundation: Postgres records owners and keeps restricted artifacts out of other readers' listings", async () => {
+  test("external-storage foundation: Postgres records owners, keeps restricted artifacts out of other readers' listings, and lists them for members they are shared with", async () => {
     expect.hasAssertions();
     const ownerIdentity = {
       apiToken: managedTestKey("postgres-owner"),
@@ -2087,11 +2087,37 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           tags: [],
         })).items.map(({name}) => name).toSorted();
       expect(await listedFor({kind: "none"})).toEqual(["Shared page"]);
-      expect(await listedFor({kind: "owned", principalId: "member_someone_else"}))
+      expect(await listedFor({kind: "member", principalId: "member_someone_else"}))
         .toEqual(["Shared page"]);
-      expect(await listedFor({kind: "owned", principalId: owner}))
+      expect(await listedFor({kind: "member", principalId: owner}))
         .toEqual(["Kept page", "Shared page"]);
       expect(await listedFor({kind: "all"})).toEqual(["Kept page", "Shared page"]);
+
+      // AUTH-033: a grant adds exactly one member to the readers, once.
+      const grant = {
+        artifactId: kept.body.artifact.id,
+        authorizedByPrincipalId: null,
+        createdAt: new Date().toISOString(),
+        idempotencyKey: `owner-grant-${randomUUID()}`,
+        memberId: "member_someone_else",
+        principalId: owner,
+        projectId,
+      } as const;
+      expect(await repository.grantArtifactAccess(grant)).toEqual({changed: true});
+      expect(await repository.grantArtifactAccess(grant)).toEqual({changed: false});
+      expect(await listedFor({kind: "member", principalId: "member_someone_else"}))
+        .toEqual(["Kept page", "Shared page"]);
+      expect(await listedFor({kind: "member", principalId: "member_third"}))
+        .toEqual(["Shared page"]);
+      expect((await repository.findArtifact(projectId, kept.body.artifact.id))
+        ?.grantedPrincipalIds).toEqual(["member_someone_else"]);
+      expect((await repository.listArtifactGrants(projectId, kept.body.artifact.id))
+        .map(({grantedByPrincipalId, principalId}) => ({grantedByPrincipalId, principalId})))
+        .toEqual([{grantedByPrincipalId: owner, principalId: "member_someone_else"}]);
+      expect(await repository.revokeArtifactAccess(grant)).toEqual({changed: true});
+      expect(await repository.revokeArtifactAccess(grant)).toEqual({changed: false});
+      expect(await listedFor({kind: "member", principalId: "member_someone_else"}))
+        .toEqual(["Shared page"]);
       expect((await repository.findArtifact(projectId, shared.body.artifact.id))
         ?.accessSetting).toBe("public_link");
     } finally {

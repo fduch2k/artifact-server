@@ -5,7 +5,7 @@ import type {PrincipalKind} from "./identity.js";
 export const accessSettings = {
   accountRequired: "account_required",
   publicLink: "public_link",
-  /** Visible only to the artifact's owner and installation administrators. */
+  /** Visible only to the owner, the members it is shared with, and administrators. */
   restricted: "restricted",
 } as const;
 
@@ -78,10 +78,21 @@ export interface ArtifactRecord {
   readonly ownerPrincipalId: string | null;
   readonly currentVersionId: string;
   readonly deletedAt: string | null;
+  /** Members the owner shared a restricted artifact with; ignored unless restricted. */
+  readonly grantedPrincipalIds: readonly string[];
   readonly id: string;
   readonly name: string;
   readonly projectId: string;
   readonly tags: readonly string[];
+}
+
+/** One member a restricted artifact is shared with. */
+export interface ArtifactGrant {
+  readonly artifactId: string;
+  readonly grantedAt: string;
+  readonly grantedByPrincipalId: string;
+  readonly principalId: string;
+  readonly projectId: string;
 }
 
 /** An artifact record whose deletion state is known to be committed. */

@@ -1738,6 +1738,20 @@ requirements:
     depends_on: [AUTH-002, AUTH-030, AUTH-008, SCP-008]
     evidence: []
 
+  - id: AUTH-033
+    kind: security
+    behavior: The owner of a restricted artifact or an administrator can share it with named active members, who can find, read, open, compare, and comment on it until the grant is revoked, while only the owner and administrators can change it or choose who sees it.
+    owner: authorization
+    source: {file: decisions/0031-restricted-artifacts-shared-with-members.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-033-B, description: "The owner shares a restricted artifact with one member, who lists, searches, reads, opens content, comments on, and dispatches it through a member-bound key; the grant survives a switch to account_required and back, a repeated grant changes nothing, the member directory lists active members to people, an administrator can share anyone's restricted artifact, and revoking ends the member's listing, reads, and open content sessions."}
+      failure: {id: AUTH-033-F, description: "A shared member, even through a key with artifact:manage:any, cannot change access or tags, restore, delete, publish, read the action history, list or change grants, delete another person's thread, or clear threads; other members and service principals cannot find the artifact or its grants and receive the same not-found answer as for a missing artifact; service principals cannot read the member directory; and grants to unknown, non-member, or deactivated principals are refused without changing the list."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-033-B and AUTH-033-F run against the local SQLite server, and a browser test drives the Review share dialog; the Postgres runtime test covers the grant, listing filter, and revocation on that backend. The D1 grant mutations and git-history credential refusal for shared members have no dedicated test, and no deployment-specific evidence is recorded.
+    depends_on: [AUTH-030, AUTH-031]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.

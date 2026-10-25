@@ -18,6 +18,7 @@ import {
   type AccessSetting,
   type ArtifactDetails,
   type ArtifactVersion,
+  type MemberDirectoryEntry,
 } from "@/api/client";
 import claudeLogoUrl from "./assets/agents/claude.svg";
 import codexDarkLogoUrl from "./assets/agents/codex-dark.svg";
@@ -32,6 +33,8 @@ import piLogoUrl from "./assets/agents/pi.svg";
 import piLightLogoUrl from "./assets/agents/pi-light.svg";
 
 type ShareScreen = "access" | "agents" | "overview";
+/** What the access editor offers: a stored setting, or restricted with chosen members. */
+type AccessChoice = AccessSetting | "selected_members";
 type CopiedTarget =
   | "agent-prompt"
   | "latest-link"
@@ -60,9 +63,13 @@ export function ReviewShareControl({
 }: ReviewShareControlProps) {
   const [open, setOpen] = useState(false);
   const [screen, setScreen] = useState<ShareScreen>("overview");
-  const [selectedAccess, setSelectedAccess] = useState<AccessSetting>(
-    details?.artifact.accessSetting ?? "account_required",
+  const [selectedAccess, setSelectedAccess] = useState<AccessChoice>(
+    details === null ? "account_required" : accessChoiceOf(details.artifact),
   );
+  const [selectedMembers, setSelectedMembers] = useState<readonly string[]>(
+    details?.artifact.grantedPrincipalIds ?? [],
+  );
+  const [directory, setDirectory] = useState<readonly MemberDirectoryEntry[] | null>(null);
   const [pending, setPending] = useState(false);
   const [copiedTarget, setCopiedTarget] = useState<CopiedTarget | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -132,37 +139,80 @@ export function ReviewShareControl({
 
   const openAccess = (): void => {
     if (details === null) return;
-    setSelectedAccess(details.artifact.accessSetting);
+    setSelectedAccess(accessChoiceOf(details.artifact));
+    setSelectedMembers(details.artifact.grantedPrincipalIds);
     setFailure(null);
     setNotice(null);
     setScreen("access");
+    if (directory === null) {
+      api.memberDirectory().then(setDirectory).catch(() => {
+        setDirectory([]);
+        setFailure("The member list could not be loaded.");
+      });
+    }
   };
+
+  const accessUnchanged = details === null || (
+    selectedAccess === accessChoiceOf(details.artifact)
+    && (
+      selectedAccess !== "selected_members"
+      || sameMembers(selectedMembers, details.artifact.grantedPrincipalIds)
+    )
+  );
 
   const saveAccess = async (): Promise<void> => {
     if (details === null) return;
-    if (selectedAccess === details.artifact.accessSetting) {
+    if (accessUnchanged) {
       setScreen("overview");
       return;
     }
+    const artifact = details.artifact;
+    const targetAccess: AccessSetting = selectedAccess === "selected_members"
+      ? "restricted"
+      : selectedAccess;
+    // "Only me" clears the list; the other settings leave it for later.
+    const desiredMembers = selectedAccess === "selected_members"
+      ? selectedMembers
+      : selectedAccess === "restricted" ? [] : artifact.grantedPrincipalIds;
     setPending(true);
     setFailure(null);
     setNotice(null);
     try {
-      const changed = await api.changeAccess(
-        details.artifact.projectId,
-        details.artifact.id,
-        details.artifact.currentVersionId,
-        selectedAccess,
-        crypto.randomUUID(),
-      );
-      onArtifactChanged(changed.artifact);
+      // Members are settled before the switch to restricted, so nobody outside
+      // the final list can open the artifact in between.
+      await Promise.all(desiredMembers
+        .filter((memberId) => !artifact.grantedPrincipalIds.includes(memberId))
+        .map((memberId) =>
+          api.grantAccess(artifact.projectId, artifact.id, memberId, crypto.randomUUID())
+        ));
+      await Promise.all(artifact.grantedPrincipalIds
+        .filter((memberId) => !desiredMembers.includes(memberId))
+        .map((memberId) =>
+          api.revokeAccess(artifact.projectId, artifact.id, memberId, crypto.randomUUID())
+        ));
+      let warning: string | null = null;
+      if (targetAccess === artifact.accessSetting) {
+        onArtifactChanged({...artifact, grantedPrincipalIds: [...desiredMembers]});
+      } else {
+        const changed = await api.changeAccess(
+          artifact.projectId,
+          artifact.id,
+          artifact.currentVersionId,
+          targetAccess,
+          crypto.randomUUID(),
+        );
+        onArtifactChanged(changed.artifact);
+        warning = changed.warning;
+      }
       setNotice(
-        changed.warning ?? (
+        warning ?? (
           selectedAccess === "public_link"
             ? "The current version can now be opened without signing in."
             : selectedAccess === "restricted"
               ? "Only you and installation administrators can now find or open this artifact."
-              : "Every signed-in member can now find and open this artifact."
+              : selectedAccess === "selected_members"
+                ? "Only you, the people you chose, and installation administrators can now find or open this artifact."
+                : "Every signed-in member can now find and open this artifact."
         ),
       );
       setScreen("overview");
@@ -170,12 +220,21 @@ export function ReviewShareControl({
       setFailure(
         caught instanceof Error ? caught.message : "Artifact access could not be changed.",
       );
+      // Some members may already have changed; show what the server now holds.
+      api.artifact(artifact.projectId, artifact.id)
+        .then((refreshed) => onArtifactChanged(refreshed.artifact))
+        .catch(() => undefined);
     } finally {
       setPending(false);
     }
   };
 
   const publicArtifact = details?.artifact.accessSetting === "public_link";
+  const accessSummary = details === null
+    ? ""
+    : details.artifact.accessSetting === "restricted"
+      ? restrictedSummary(details.artifact.grantedPrincipalIds.length)
+      : "People with access to this Artifact Server can review this exact version.";
   const serverOrigin = details === null ? "" : new URL(details.links.artifact).origin;
   const mcpAddress = `${serverOrigin}/mcp`;
 
@@ -273,7 +332,7 @@ export function ReviewShareControl({
                     strokeWidth={1.8}
                   />
                   <p>
-                    People with access to this Artifact Server can review this exact version.
+                    {accessSummary}
                     {publicArtifact ? " The latest raw artifact is public." : ""}
                   </p>
                   <button
@@ -428,6 +487,14 @@ export function ReviewShareControl({
                     value="restricted"
                   />
                   <ShareAccessOption
+                    checked={selectedAccess === "selected_members"}
+                    description="You, the members you choose, and installation administrators can find and open it. The people you choose can read and comment."
+                    disabled={pending}
+                    label="Selected people"
+                    onChange={() => setSelectedAccess("selected_members")}
+                    value="selected_members"
+                  />
+                  <ShareAccessOption
                     checked={selectedAccess === "account_required"}
                     description="Every signed-in member of this installation can find and open it."
                     disabled={pending}
@@ -444,10 +511,19 @@ export function ReviewShareControl({
                     value="public_link"
                   />
                 </fieldset>
+                {selectedAccess === "selected_members" ? (
+                  <SharePeoplePicker
+                    directory={directory}
+                    disabled={pending}
+                    onChange={setSelectedMembers}
+                    ownerPrincipalId={details?.artifact.ownerPrincipalId ?? null}
+                    selected={selectedMembers}
+                  />
+                ) : null}
                 <p className="as-share-network-note">
                   Public access does not create a tunnel, open a firewall, or make an unreachable server reachable.
                 </p>
-                {selectedAccess !== details?.artifact.accessSetting ? (
+                {!accessUnchanged ? (
                   <p className="as-share-access-warning">
                     {selectedAccess === "public_link"
                       ? "The link can be redistributed. Earlier versions and history stay account-required."
@@ -471,7 +547,8 @@ export function ReviewShareControl({
                     disabled={
                       details === null
                       || pending
-                      || selectedAccess === details.artifact.accessSetting
+                      || accessUnchanged
+                      || (selectedAccess === "selected_members" && selectedMembers.length === 0)
                     }
                     onClick={() => void saveAccess()}
                     type="button"
@@ -642,7 +719,9 @@ Version: ${selectedVersion.version.number}
 Version ID: ${selectedVersion.version.id}
 Access: ${details.artifact.accessSetting === "public_link"
   ? "public link"
-  : details.artifact.accessSetting === "restricted" ? "only me" : "signed-in members"}
+  : details.artifact.accessSetting !== "restricted"
+    ? "signed-in members"
+    : details.artifact.grantedPrincipalIds.length === 0 ? "only me" : "selected people"}
 Review and comment: ${reviewLink}
 Raw exact version: ${selectedVersion.links.version}
 Moving latest link: ${details.links.artifact}
@@ -663,6 +742,120 @@ If Artifact Server MCP is not connected:
 Never paste credentials into chat, source files, or the review. If access fails, state which connection or permission is missing.`;
 }
 
+function accessChoiceOf(artifact: ArtifactDetails["artifact"]): AccessChoice {
+  return artifact.accessSetting === "restricted" && artifact.grantedPrincipalIds.length > 0
+    ? "selected_members"
+    : artifact.accessSetting;
+}
+
+function sameMembers(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((memberId) => right.includes(memberId));
+}
+
+function restrictedSummary(memberCount: number): string {
+  if (memberCount === 0) {
+    return "Only you and installation administrators can review this artifact.";
+  }
+  const people = memberCount === 1 ? "1 person you chose" : `${memberCount} people you chose`;
+  return `Only you, ${people}, and installation administrators can review this artifact.`;
+}
+
+const maximumMemberSuggestions = 6;
+
+/** Choose the members a restricted artifact is shared with. */
+function SharePeoplePicker({
+  directory,
+  disabled,
+  onChange,
+  ownerPrincipalId,
+  selected,
+}: {
+  readonly directory: readonly MemberDirectoryEntry[] | null;
+  readonly disabled: boolean;
+  readonly onChange: (members: readonly string[]) => void;
+  readonly ownerPrincipalId: string | null;
+  readonly selected: readonly string[];
+}) {
+  const [query, setQuery] = useState("");
+  const membersById = new Map((directory ?? []).map((member) => [member.id, member]));
+  const normalizedQuery = query.trim().toLowerCase();
+  const suggestions = normalizedQuery === ""
+    ? []
+    : (directory ?? []).filter((member) =>
+      member.id !== ownerPrincipalId
+      && !selected.includes(member.id)
+      && (
+        member.displayName.toLowerCase().includes(normalizedQuery)
+        || member.email.toLowerCase().includes(normalizedQuery)
+      )
+    ).slice(0, maximumMemberSuggestions);
+
+  return (
+    <div className="as-share-people">
+      {selected.length === 0 ? (
+        <p className="as-share-people__empty">Add at least one person.</p>
+      ) : (
+        <ul aria-label="People who can open this artifact" className="as-share-people__chosen">
+          {selected.map((memberId) => {
+            const member = membersById.get(memberId);
+            const name = member?.displayName ?? "Former member";
+            return (
+              <li key={memberId}>
+                <span>
+                  <strong>{name}</strong>
+                  <small>{member?.email ?? "No longer an active member"}</small>
+                </span>
+                <button
+                  aria-label={`Remove ${name}`}
+                  className="as-icon-button"
+                  disabled={disabled}
+                  onClick={() => onChange(selected.filter((candidate) => candidate !== memberId))}
+                  type="button"
+                >
+                  <HugeiconsIcon aria-hidden="true" icon={Cancel01Icon} strokeWidth={1.8} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <input
+        aria-label="Add people by name or email"
+        className="as-share-people__search"
+        disabled={disabled || directory === null}
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        placeholder={directory === null ? "Loading members…" : "Add people by name or email"}
+        type="search"
+        value={query}
+      />
+      {normalizedQuery === "" ? null : (
+        <ul aria-label="Matching members" className="as-share-people__suggestions">
+          {suggestions.length === 0 ? (
+            <li className="as-share-people__empty">No signed-in member matches.</li>
+          ) : suggestions.map((member) => (
+            <li key={member.id}>
+              <button
+                disabled={disabled}
+                onClick={() => {
+                  onChange([...selected, member.id]);
+                  setQuery("");
+                }}
+                type="button"
+              >
+                <strong>{member.displayName}</strong>
+                <small>{member.email}</small>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="as-share-people__note">
+        Only people who have signed in to this server at least once can be added.
+      </p>
+    </div>
+  );
+}
+
 function ShareAccessOption({
   checked,
   description,
@@ -676,7 +869,7 @@ function ShareAccessOption({
   readonly disabled: boolean;
   readonly label: string;
   readonly onChange: () => void;
-  readonly value: AccessSetting;
+  readonly value: AccessChoice;
 }) {
   return (
     <label className="as-share-access-option" data-checked={checked}>

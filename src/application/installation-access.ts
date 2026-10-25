@@ -28,6 +28,7 @@ import {
   type LoginAttempt,
   managedApiKeyCredentialPattern,
   type ManagedApiKey,
+  type MemberDirectoryEntry,
   memberStatuses,
   type StoredManagedApiKey,
 } from "../core/installation-identity.js";
@@ -262,6 +263,20 @@ export interface InstallationAccessOperations {
   ) => Effect.Effect<
     readonly InstallationMember[],
     AuthorizationDenied | IdentityRepositoryFailure
+  >;
+  /** Active members a person may share a restricted artifact with. */
+  readonly listMemberDirectory: (
+    principal: Principal,
+  ) => Effect.Effect<
+    readonly MemberDirectoryEntry[],
+    AuthorizationDenied | IdentityRepositoryFailure
+  >;
+  /** One active member of this installation, checked before sharing with them. */
+  readonly findActiveMember: (
+    memberId: string,
+  ) => Effect.Effect<
+    MemberDirectoryEntry,
+    IdentityNotFound | IdentityRepositoryFailure
   >;
   readonly issueLocalBrowserLogin: (
     credential: Redacted.Redacted,
@@ -608,6 +623,39 @@ function makeInstallationAccessService(
     return yield* dependencies.repository.listMembers(dependencies.installationId);
   });
 
+  const listMemberDirectory = Effect.fn(
+    "InstallationAccessService.listMemberDirectory",
+  )(function*(principal: Principal) {
+    // People share with people: a service principal has no one to share as.
+    if (
+      principal.installationId !== dependencies.installationId ||
+      principal.kind !== principalKinds.human
+    ) {
+      return yield* new AuthorizationDenied({
+        message: "The authenticated principal is not permitted to perform this operation.",
+      });
+    }
+    const members = yield* dependencies.repository.listMembers(dependencies.installationId);
+    return members
+      .filter((member) => member.status === memberStatuses.active)
+      .map(memberDirectoryEntry);
+  });
+
+  const findActiveMember = Effect.fn(
+    "InstallationAccessService.findActiveMember",
+  )(function*(memberId: string) {
+    const member = yield* dependencies.repository.findMember(
+      dependencies.installationId,
+      memberId,
+    );
+    if (member?.status !== memberStatuses.active) {
+      return yield* new IdentityNotFound({
+        message: "The active member does not exist.",
+      });
+    }
+    return memberDirectoryEntry(member);
+  });
+
   const deactivateMember = Effect.fn(
     "InstallationAccessService.deactivateMember",
   )(function*(principal: Principal, memberId: string) {
@@ -772,13 +820,19 @@ function makeInstallationAccessService(
     issueApiKey,
     issueLocalBrowserLogin,
     loginAsLocalOwner,
+    findActiveMember,
     listApiKeys,
+    listMemberDirectory,
     listMembers,
     loginWithLocalBrowserToken,
     revokeApiKey,
     revokeSession,
     rotateApiKey,
   });
+}
+
+function memberDirectoryEntry(member: InstallationMember): MemberDirectoryEntry {
+  return {displayName: member.displayName, email: member.email, id: member.id};
 }
 
 function humanPrincipal(member: InstallationMember): Principal {

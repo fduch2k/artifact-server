@@ -164,6 +164,7 @@ const accessSettingSchema = z.enum([
 ]);
 const artifactTagsSchema = z.array(z.string()).default([]);
 const projectIdSchema = z.string().trim().min(1).max(200);
+const memberIdSchema = z.string().trim().min(1).max(200);
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
 }).strict();
@@ -1039,6 +1040,17 @@ export function createHttpApp(
     }
     clearApplicationSessionCookies(context, dependencies);
     return context.body(null, 204);
+  });
+
+  app.get("/api/v1/member-directory", async (context) => {
+    const members = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      InstallationAccessService.use((access) =>
+        access.listMemberDirectory(context.get("principal"))
+      ),
+    );
+    return context.json({members});
   });
 
   app.get("/api/v1/members", async (context) => {
@@ -2088,6 +2100,59 @@ export function createHttpApp(
       });
     },
   );
+
+  app.get("/api/v1/artifacts/:artifactId/grants", async (context) => {
+    const grants = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ArtifactManagementService.use((management) =>
+        management.listSharedMembers({
+          artifactId: context.req.param("artifactId"),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json({grants});
+  });
+
+  app.put("/api/v1/artifacts/:artifactId/grants/:memberId", async (context) => {
+    const change = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ArtifactManagementService.use((management) =>
+        management.grantAccess({
+          artifactId: context.req.param("artifactId"),
+          idempotencyKey: requiredIdempotencyKey(
+            context.req.header("idempotency-key"),
+          ),
+          memberId: memberIdSchema.parse(context.req.param("memberId")),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json(change);
+  });
+
+  app.delete("/api/v1/artifacts/:artifactId/grants/:memberId", async (context) => {
+    const change = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ArtifactManagementService.use((management) =>
+        management.revokeAccess({
+          artifactId: context.req.param("artifactId"),
+          idempotencyKey: requiredIdempotencyKey(
+            context.req.header("idempotency-key"),
+          ),
+          memberId: memberIdSchema.parse(context.req.param("memberId")),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json(change);
+  });
 
   app.patch(
     "/api/v1/artifacts/:artifactId/tags",

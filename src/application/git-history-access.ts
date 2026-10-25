@@ -1,6 +1,9 @@
 import {Context, Effect, Layer} from "effect";
 
-import {canSeeArtifact} from "../core/artifact-visibility.js";
+import {
+  canSeeArtifact,
+  mayChangeRestriction,
+} from "../core/artifact-visibility.js";
 import {
   ArtifactNotFound,
   type ArtifactRepositoryFailure,
@@ -8,7 +11,7 @@ import {
   type AuthorizationDenied,
 } from "../core/errors.js";
 import type {Principal} from "../core/identity.js";
-import type {ArtifactRecord} from "../core/model.js";
+import {accessSettings, type ArtifactRecord} from "../core/model.js";
 import type {
   GitCloneCredential,
   GitHistoryProvider,
@@ -117,6 +120,10 @@ function makeGitHistoryAccessService(
     if (
       artifact === null || artifact.deletedAt !== null ||
       !canSeeArtifact(command.principal, artifact) ||
+      // Clone credentials cannot be revoked early, so members a restricted
+      // artifact is shared with do not get them; its owner and administrators do.
+      (artifact.accessSetting === accessSettings.restricted &&
+        !mayChangeRestriction(command.principal, artifact)) ||
       setting?.enabled !== true || coordinates?.status !== "provisioned" ||
       dependencies.provider === null
     ) {

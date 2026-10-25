@@ -13,6 +13,7 @@ const publishResponseSchema = z.object({
     createdAt: z.string(),
     currentVersionId: z.string(),
     deletedAt: z.string().nullable(),
+    grantedPrincipalIds: z.array(z.string()),
     id: z.string(),
     name: z.string(),
     ownerPrincipalId: z.string().nullable(),
