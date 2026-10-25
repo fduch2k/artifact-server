@@ -102,6 +102,13 @@ action ledgers constrain the action kinds, and an access change is what a
 grant is; a new kind would need a table rebuild on D1 for no new information.
 A repeated grant or revocation changes nothing and records nothing.
 
+Grants keep no replay record. A request that would change the list with an
+idempotency key that already recorded an action in the project is refused as
+an idempotency conflict, on every backend: Postgres would otherwise fail on
+its unique action key, and SQLite and D1 would otherwise record one key for
+two different changes. Retrying the same grant with the same key finds the
+grant already in place and answers that nothing changed.
+
 ### Storage: one table
 
 Each backend gains `artifact_grants`, keyed by artifact and member, with an
