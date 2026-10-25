@@ -1,0 +1,81 @@
+name: Fork image
+
+# Publishes the integration branch of this fork as a GHCR image after the
+# full gate passes. Upstream releases stay with release.yml.
+
+on:
+  push:
+    branches: [integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Full gate
+    if: github.repository == 'fduch2k/artifact-server'
+    uses: ./.github/workflows/ci.yml
+    with:
+      tier: full
+
+  image:
+    name: Publish integration image
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.34.3
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - name: Install dependencies without a cache
+        run: pnpm install --frozen-lockfile
+      - name: Prepare attestation-capable BuildKit
+        run: |
+          docker buildx create \
+            --driver docker-container \
+            --driver-opt image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8 \
+            --name artifact-server-fork \
+            --use
+          docker buildx inspect --bootstrap
+      - name: Sign in to GHCR
+        env:
+          ARTIFACTSERVER_GITHUB_ACTOR: ${{ github.actor }}
+          ARTIFACTSERVER_GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          docker login ghcr.io
+          --username "$ARTIFACTSERVER_GITHUB_ACTOR"
+          --password-stdin
+          <<< "$ARTIFACTSERVER_GITHUB_TOKEN"
+      - name: Build and push the image
+        env:
+          ARTIFACT_SERVER_IMAGE_PUSH: "true"
+          ARTIFACT_SERVER_IMAGE_SOURCE: https://github.com/${{ github.repository }}
+          ARTIFACT_SERVER_IMAGE_TAGS: ghcr.io/${{ github.repository }}:integration-${{ github.sha }},ghcr.io/${{ github.repository }}:integration
+        run: pnpm package:oci release/image-work
+      - name: Record the immutable image reference
+        env:
+          ARTIFACTSERVER_IMAGE: ghcr.io/${{ github.repository }}:integration-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          artifactserver_digest=$(docker buildx imagetools inspect "$ARTIFACTSERVER_IMAGE" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          printf 'Image: `%s`\n\nPin: `ghcr.io/%s@%s`\n' \
+            "$ARTIFACTSERVER_IMAGE" "$GITHUB_REPOSITORY" "$artifactserver_digest" \
+            >> "$GITHUB_STEP_SUMMARY"
