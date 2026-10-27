@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 
+import { ownsArtifact } from "../core/artifact-visibility.js";
 import { AuthorizationDenied } from "../core/errors.js";
 import {
   hasCapability,
@@ -10,6 +11,9 @@ import {
   type Principal,
 } from "../core/identity.js";
 import type { ArtifactRecord } from "../core/model.js";
+
+/** The ownership fact an owner-scoped capability is checked against. */
+export type ArtifactOwnership = Pick<ArtifactRecord, "ownerPrincipalId">;
 
 /** Configuration trusted by standalone authorization policy. */
 export interface AuthorizationDependencies {
@@ -35,6 +39,7 @@ export interface AuthorizationOperations {
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireArtifactManagement: (
     principal: Principal,
+    artifact: ArtifactOwnership,
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireArtifactRead: (
     principal: Principal,
@@ -60,6 +65,7 @@ export interface AuthorizationOperations {
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireVersionPublication: (
     principal: Principal,
+    artifact: ArtifactOwnership,
   ) => Effect.Effect<void, AuthorizationDenied>;
 }
 
@@ -207,13 +213,17 @@ function makeAuthorizationService(
     yield* denied();
   });
 
+  // The owner-scoped capability reaches only artifacts the key's member owns,
+  // so a person's agent cannot change a colleague's work.
   const requireArtifactManagement = Effect.fn(
     "AuthorizationService.requireArtifactManagement",
-  )(function*(principal: Principal) {
+  )(function*(principal: Principal, artifact: ArtifactOwnership) {
     yield* requireInstallation(principal);
     if (isDirectHumanPrincipal(principal)) return;
     if (
-      hasCapability(principal, principalCapabilities.manageAnyArtifact)
+      hasCapability(principal, principalCapabilities.manageAnyArtifact) ||
+      (hasCapability(principal, principalCapabilities.manageOwnArtifact) &&
+        ownsArtifact(principal, artifact))
     ) {
       return;
     }
@@ -227,7 +237,8 @@ function makeAuthorizationService(
     if (
       isDirectHumanPrincipal(principal) ||
       hasCapability(principal, principalCapabilities.createArtifact) ||
-      hasCapability(principal, principalCapabilities.publishAnyArtifact)
+      hasCapability(principal, principalCapabilities.publishAnyArtifact) ||
+      hasCapability(principal, principalCapabilities.publishOwnArtifact)
     ) {
       return;
     }
@@ -243,8 +254,10 @@ function makeAuthorizationService(
       hasCapability(principal, principalCapabilities.createArtifact) ||
       hasCapability(principal, principalCapabilities.issueContentSession) ||
       hasCapability(principal, principalCapabilities.manageAnyArtifact) ||
+      hasCapability(principal, principalCapabilities.manageOwnArtifact) ||
       hasCapability(principal, principalCapabilities.manageProjects) ||
       hasCapability(principal, principalCapabilities.publishAnyArtifact) ||
+      hasCapability(principal, principalCapabilities.publishOwnArtifact) ||
       hasCapability(principal, principalCapabilities.readArtifacts) ||
       hasCapability(principal, principalCapabilities.writeComments)
     ) {
@@ -268,11 +281,13 @@ function makeAuthorizationService(
 
   const requireVersionPublication = Effect.fn(
     "AuthorizationService.requireVersionPublication",
-  )(function*(principal: Principal) {
+  )(function*(principal: Principal, artifact: ArtifactOwnership) {
     yield* requireInstallation(principal);
     if (isDirectHumanPrincipal(principal)) return;
     if (
-      hasCapability(principal, principalCapabilities.publishAnyArtifact)
+      hasCapability(principal, principalCapabilities.publishAnyArtifact) ||
+      (hasCapability(principal, principalCapabilities.publishOwnArtifact) &&
+        ownsArtifact(principal, artifact))
     ) {
       return;
     }

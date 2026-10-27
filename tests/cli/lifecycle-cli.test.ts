@@ -604,6 +604,61 @@ describe("Artifact Server lifecycle CLI", () => {
       await rm(parent, {force: true, recursive: true});
     }
   }, 30_000);
+
+  test("AUTH-034: compact serving reads the personal API key settings and refuses malformed ones", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "artifact-server-personal-keys-"));
+    const dataDirectory = path.join(parent, "data");
+    try {
+      const initialized = await runCli([
+        "init",
+        "--admin-email",
+        "admin@example.test",
+        "--data",
+        dataDirectory,
+      ]);
+      expect(initialized.exitCode).toBe(0);
+      const oidc = {
+        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-test-client",
+        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
+      };
+      const malformed = await runCli(
+        ["start-compact", "--data", dataDirectory, "--port", "0"],
+        compactEnvironment({
+          ...oidc,
+          ARTIFACT_SERVER_PERSONAL_API_KEYS: "true",
+          ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS: "0",
+        }),
+      );
+      expect(malformed.exitCode).not.toBe(0);
+      expect(malformed.output).toContain("ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS");
+
+      const port = await availablePort();
+      const server = startCli(
+        ["start-compact", "--data", dataDirectory, "--port", String(port)],
+        compactEnvironment({
+          ...oidc,
+          ARTIFACT_SERVER_PERSONAL_API_KEYS: "true",
+          ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS: "365",
+        }),
+      );
+      await waitForOutput(server, '"status":"ready"');
+      const apiToken = (await readFile(
+        path.join(dataDirectory, "secrets/api-token"),
+        "utf8",
+      )).trim();
+      const session = await fetch(`http://127.0.0.1:${port}/api/v1/session`, {
+        headers: {Authorization: `Bearer ${apiToken}`},
+      });
+      expect(session.status).toBe(200);
+      expect(z.object({
+        capabilities: z.object({personalApiKeys: z.unknown()}),
+      }).parse(await session.json()).capabilities.personalApiKeys)
+        .toEqual({maxLifetimeDays: 365});
+      await stopProcess(server);
+    } finally {
+      await rm(parent, {force: true, recursive: true});
+    }
+  }, 30_000);
 });
 
 function compactEnvironment(

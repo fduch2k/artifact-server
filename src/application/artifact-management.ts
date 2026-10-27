@@ -522,7 +522,7 @@ function makeArtifactManagementService(
       command.artifactId,
     );
     yield* requireArtifactVisible(command.principal, artifact);
-    yield* authorization.requireArtifactManagement(command.principal);
+    yield* authorization.requireArtifactManagement(command.principal, artifact);
     yield* requireArtifactChangeable(command.principal, artifact);
     return yield* dependencies.repository.listArtifactActions({
       artifactId: artifact.id,
@@ -540,7 +540,7 @@ function makeArtifactManagementService(
       );
       const artifact = yield* requireArtifact(project.id, command.artifactId);
       yield* requireArtifactVisible(command.principal, artifact);
-      yield* authorization.requireArtifactManagement(command.principal);
+      yield* authorization.requireArtifactManagement(command.principal, artifact);
       yield* requireArtifactChangeable(command.principal, artifact);
       yield* requireVersion(project.id, artifact.id, command.versionId);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
@@ -574,7 +574,7 @@ function makeArtifactManagementService(
       );
       const artifact = yield* requireArtifact(project.id, command.artifactId);
       yield* requireArtifactVisible(command.principal, artifact);
-      yield* authorization.requireArtifactManagement(command.principal);
+      yield* authorization.requireArtifactManagement(command.principal, artifact);
       // Only the owner or an administrator moves an artifact to or from restricted.
       if (
         (artifact.accessSetting === accessSettings.restricted ||
@@ -616,7 +616,7 @@ function makeArtifactManagementService(
       );
       const artifact = yield* requireArtifact(project.id, command.artifactId);
       yield* requireArtifactVisible(command.principal, artifact);
-      yield* authorization.requireArtifactManagement(command.principal);
+      yield* authorization.requireArtifactManagement(command.principal, artifact);
       yield* requireArtifactChangeable(command.principal, artifact);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const tags = yield* parseArtifactTags(command.tags);
@@ -653,7 +653,7 @@ function makeArtifactManagementService(
         command.artifactId,
       );
       yield* requireArtifactVisible(command.principal, artifact);
-      yield* authorization.requireArtifactManagement(command.principal);
+      yield* authorization.requireArtifactManagement(command.principal, artifact);
       yield* requireArtifactChangeable(command.principal, artifact);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
@@ -682,7 +682,7 @@ function makeArtifactManagementService(
   const requireSharingAuthority = Effect.fn(
     "ArtifactManagementService.requireSharingAuthority",
   )(function*(principal: Principal, artifact: ArtifactRecord) {
-    yield* authorization.requireArtifactManagement(principal);
+    yield* authorization.requireArtifactManagement(principal, artifact);
     if (mayChangeRestriction(principal, artifact)) return;
     yield* Effect.fail(new AuthorizationDenied({
       message: "Only the owner or an administrator can change who sees this artifact.",

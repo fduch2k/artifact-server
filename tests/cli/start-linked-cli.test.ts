@@ -28,6 +28,8 @@ const sessionSchema = z.object({
       providerState: z.literal("misconfigured"),
     }).strict(),
     linkedArtifacts: z.boolean(),
+    // Personal API keys stay off unless the operator opts in.
+    personalApiKeys: z.null(),
   }).strict(),
 }).loose();
 const linkedPublicationSchema = z.object({

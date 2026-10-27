@@ -494,9 +494,9 @@ function makeArtifactCommentService(
 
   const requireCommentDeletionAuthority = Effect.fn(
     "ArtifactCommentService.requireCommentDeletionAuthority",
-  )(function*(principal: Principal) {
+  )(function*(principal: Principal, artifact: ArtifactRecord) {
     if (hasCapability(principal, principalCapabilities.manageAnyArtifact)) {
-      return yield* authorization.requireArtifactManagement(principal);
+      return yield* authorization.requireArtifactManagement(principal, artifact);
     }
     return yield* authorization.requireCommentWrite(principal);
   });
@@ -671,8 +671,8 @@ function makeArtifactCommentService(
         command.principal,
         command.projectId,
       );
-      yield* requireCommentDeletionAuthority(command.principal);
       const artifact = yield* requireArtifact(command.principal, project.id, command.artifactId);
+      yield* requireCommentDeletionAuthority(command.principal, artifact);
       const thread = yield* requireThread(
         project.id,
         artifact.id,
@@ -784,8 +784,8 @@ function makeArtifactCommentService(
         command.principal,
         command.projectId,
       );
-      yield* requireCommentDeletionAuthority(command.principal);
       const artifact = yield* requireArtifact(command.principal, project.id, command.artifactId);
+      yield* requireCommentDeletionAuthority(command.principal, artifact);
       const thread = yield* requireThread(
         project.id,
         artifact.id,

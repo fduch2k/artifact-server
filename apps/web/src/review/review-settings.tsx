@@ -9,6 +9,7 @@ import {parseSettingsRoute, type SettingsRoute} from "./review-routes.ts";
 import {ApiKeysScreen} from "./settings-api-keys.tsx";
 import {McpScreen} from "./settings-mcp.tsx";
 import {MembersScreen} from "./settings-members.tsx";
+import {PersonalApiKeysScreen} from "./settings-personal-api-keys.tsx";
 import {SettingsProject, SettingsProjects} from "./settings-projects.tsx";
 import {PublicLinksScreen} from "./settings-public-links.tsx";
 import {WebmcpScreen} from "./settings-webmcp.tsx";
@@ -87,6 +88,11 @@ export function ReviewSettings({
           <SettingsLink active={route.kind === "webmcp"} href="/review/settings/webmcp">
             WebMCP
           </SettingsLink>
+          {directHuman ? (
+            <SettingsLink active={route.kind === "personalApiKeys"} href="/review/settings/personal-api-keys">
+              Personal API keys
+            </SettingsLink>
+          ) : null}
           {administrator ? (
             <>
               <SettingsLink active={route.kind === "members"} href="/review/settings/members">Members</SettingsLink>
@@ -99,6 +105,7 @@ export function ReviewSettings({
           <SettingsContent
             administrator={administrator}
             canManageProjects={canManageProjects}
+            directHuman={directHuman}
             onProjectsChanged={onProjectsChanged}
             projects={projects}
             route={route}
@@ -113,6 +120,7 @@ export function ReviewSettings({
 function SettingsContent({
   administrator,
   canManageProjects,
+  directHuman,
   onProjectsChanged,
   projects,
   route,
@@ -120,6 +128,7 @@ function SettingsContent({
 }: {
   readonly administrator: boolean;
   readonly canManageProjects: boolean;
+  readonly directHuman: boolean;
   readonly onProjectsChanged: () => Promise<readonly Project[]>;
   readonly projects: readonly Project[];
   readonly route: SettingsRoute;
@@ -160,8 +169,26 @@ function SettingsContent({
       />
     );
   }
-  if (route.kind === "mcp") return <McpScreen administrator={administrator} />;
+  const personalApiKeys = session.capabilities.personalApiKeys;
+  if (route.kind === "mcp") {
+    return (
+      <McpScreen
+        administrator={administrator}
+        personalApiKeys={directHuman && personalApiKeys !== null}
+      />
+    );
+  }
   if (route.kind === "webmcp") return <WebmcpScreen />;
+  if (route.kind === "personalApiKeys") {
+    // A key cannot list or mint keys: only the person's own session can.
+    if (!directHuman) return <PersonalKeysNeedSession />;
+    return (
+      <PersonalApiKeysScreen
+        maxLifetimeDays={personalApiKeys?.maxLifetimeDays ?? null}
+        principalId={session.principal.id}
+      />
+    );
+  }
   if (!administrator) return <AdministratorPermissionRequired />;
   switch (route.kind) {
     case "members":
@@ -195,6 +222,15 @@ function ProjectPermissionRequired() {
     <StatePanel
       description="This account cannot manage projects."
       title="Project permission required"
+    />
+  );
+}
+
+function PersonalKeysNeedSession() {
+  return (
+    <StatePanel
+      description="Sign in through the browser to see and issue the keys that act as you."
+      title="Browser sign-in required"
     />
   );
 }

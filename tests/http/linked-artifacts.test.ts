@@ -170,6 +170,8 @@ describe("linked artifacts over the local HTTP boundary", () => {
       capabilities: z.object({
         gitHistory: z.unknown(),
         linkedArtifacts: z.boolean(),
+        // Personal API keys stay off unless the operator opts in.
+        personalApiKeys: z.null(),
       }).strict(),
     }).loose().parse(await session.json());
     expect(sessionBody.capabilities.linkedArtifacts).toBe(false);

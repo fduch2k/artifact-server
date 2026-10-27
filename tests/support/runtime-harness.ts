@@ -26,7 +26,10 @@ import type {
   McpOAuthResourceConfiguration,
 } from "../../src/http/create-http-app.js";
 import type {Clock} from "../../src/core/ports.js";
-import type {ExternalIdentityAdmissionPolicy} from "../../src/core/installation-identity.js";
+import type {
+  ExternalIdentityAdmissionPolicy,
+  PersonalApiKeyPolicy,
+} from "../../src/core/installation-identity.js";
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
 import {defaultCompletedRequestLogSampleRate} from
@@ -104,6 +107,7 @@ export async function startTestServer(
     readonly linkRoots?: readonly string[];
     readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
     readonly observability?: boolean;
+    readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
     readonly port?: number;
     readonly webAssetsRoot?: string;
   } = {},
@@ -188,6 +192,9 @@ export async function startTestServer(
   }
   if (options.mcpOAuthResource !== undefined) {
     config = {...config, mcpOAuthResource: options.mcpOAuthResource};
+  }
+  if (options.personalApiKeyPolicy !== undefined) {
+    config = {...config, personalApiKeyPolicy: options.personalApiKeyPolicy};
   }
   if (options.webAssetsRoot !== undefined) {
     config = {...config, webAssetsRoot: options.webAssetsRoot};

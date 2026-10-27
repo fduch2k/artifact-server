@@ -1,5 +1,7 @@
 import {expect, type Browser, type BrowserContext, type Page} from "@playwright/test";
 
+import type {PersonalApiKeyPolicy} from "../../src/core/installation-identity.js";
+
 import {
   createTestInstallation,
   removeTestInstallation,
@@ -18,11 +20,18 @@ export interface BrowserFixture {
 
 export async function startBrowserFixture(
   browser: Browser,
-  options: {readonly timezoneId?: string} = {},
+  options: {
+    readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
+    readonly timezoneId?: string;
+  } = {},
 ): Promise<BrowserFixture> {
+  const {personalApiKeyPolicy, ...contextOptions} = options;
   const installation = await createTestInstallation();
-  const server = await startTestServer(installation);
-  const context = await browser.newContext(options);
+  const server = await startTestServer(
+    installation,
+    personalApiKeyPolicy === undefined ? {} : {personalApiKeyPolicy},
+  );
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   return {context, installation, page, server};
 }

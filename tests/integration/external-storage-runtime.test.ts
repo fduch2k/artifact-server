@@ -40,7 +40,10 @@ import type {GitHistoryProviderHealthProbe} from
   "../../src/git-history/git-history-provider-health.js";
 import {managedApiKeyCredentialPattern} from
   "../../src/core/installation-identity.js";
-import type {ExternalIdentityAdmissionPolicy} from "../../src/core/installation-identity.js";
+import type {
+  ExternalIdentityAdmissionPolicy,
+  PersonalApiKeyPolicy,
+} from "../../src/core/installation-identity.js";
 import {
   browserLoginKinds,
   privateTeamBrowserAccess,
@@ -1091,6 +1094,87 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       } finally {
         await database.close();
       }
+    } finally {
+      Object.assign(oidcProvider.claims, previousClaims);
+    }
+  });
+
+  test("AUTH-034 AUTH-035: a personal key issued on one Postgres replica acts as its member on another and dies when revoked there", async () => {
+    const previousClaims = {...oidcProvider.claims};
+    const identity = {
+      apiToken: managedTestKey("personal-api-keys"),
+      autoAdmit: true,
+      installationId: "external-storage-personal-api-keys",
+      personalApiKeyMaxDays: 45,
+    };
+    const [first, second] = await Promise.all([
+      startExternalStorageProcess(environment, identity),
+      startInProcessExternalStorageServer(environment, identity, {
+        externalIdentityAdmissionPolicy: {provider: `oidc:${oidcProvider.issuer}`, allowedEmailDomains: []},
+        personalApiKeyPolicy: {maxLifetimeDays: 45},
+      }),
+    ]);
+    try {
+      oidcProvider.claims.email = oidcAdministratorEmail;
+      oidcProvider.claims.subject = "postgres-personal-keys-administrator";
+      oidcProvider.claims.emailVerified = true;
+      expect((await oidcBrowserLogin(first.baseUrl)).status).toBe(303);
+      oidcProvider.claims.email = "ada@ackstorm.com";
+      oidcProvider.claims.subject = "postgres-personal-keys-ada";
+      const login = await oidcBrowserLogin(first.baseUrl);
+      expect(login.status).toBe(303);
+      const ada = applicationCookies(login.headers.getSetCookie());
+      const sessionSchema = z.object({
+        capabilities: z.object({personalApiKeys: z.unknown()}),
+        principal: z.object({
+          authorizedByPrincipalId: z.string().nullable(),
+          capabilities: z.array(z.string()),
+          id: z.string(),
+          kind: z.string(),
+        }),
+      });
+      const adaSession = sessionSchema.parse(await (await fetch(`${second.baseUrl}/api/v1/session`, {
+        headers: {Cookie: ada.header},
+      })).json());
+      expect(adaSession.capabilities.personalApiKeys).toEqual({maxLifetimeDays: 45});
+
+      const issue = (capabilities: readonly string[], days: number) => fetch(`${first.baseUrl}/api/v1/personal-api-keys`, {
+        body: JSON.stringify({
+          capabilities,
+          expiresAt: new Date(Date.now() + days * 86_400_000).toISOString(),
+          name: "Ada's agent",
+        }),
+        headers: browserMutationHeaders("https://artifacts.example.com", ada),
+        method: "POST",
+      });
+      expect((await issue(["artifact:manage:any"], 7)).status).toBe(403);
+      expect((await issue(["artifact:read"], 46)).status).toBe(409);
+      const issued = await issue(["artifact:manage:own", "artifact:publish:own", "artifact:read"], 45);
+      expect(issued.status).toBe(201);
+      const key = z.object({apiKey: z.object({id: z.string()}), token: z.string()})
+        .parse(await issued.json());
+
+      // Never authenticated on the first replica, so no cached success outlives revocation there.
+      const asKey = sessionSchema.parse(await (await fetch(`${second.baseUrl}/api/v1/session`, {
+        headers: {Authorization: `Bearer ${key.token}`},
+      })).json());
+      expect(asKey.principal).toEqual({
+        authorizedByPrincipalId: adaSession.principal.id,
+        capabilities: ["artifact:manage:own", "artifact:publish:own", "artifact:read"],
+        id: adaSession.principal.id,
+        kind: "human",
+      });
+      const listed = await fetch(`${second.baseUrl}/api/v1/personal-api-keys`, {headers: {Cookie: ada.header}});
+      expect(z.object({apiKeys: z.array(z.object({id: z.string()}))}).parse(await listed.json()).apiKeys
+        .map(({id}) => id)).toEqual([key.apiKey.id]);
+      const revoked = await fetch(`${second.baseUrl}/api/v1/personal-api-keys/${key.apiKey.id}/revoke`, {
+        headers: browserMutationHeaders("https://artifacts.example.com", ada),
+        method: "POST",
+      });
+      expect(revoked.status).toBe(200);
+      expect((await fetch(`${first.baseUrl}/api/v1/session`, {
+        headers: {Authorization: `Bearer ${key.token}`},
+      })).status).toBe(401);
     } finally {
       Object.assign(oidcProvider.claims, previousClaims);
     }
@@ -2758,6 +2842,7 @@ function startExternalStorageProcess(
     readonly installationId: string;
     readonly storageBucket?: string;
     readonly autoAdmit?: boolean;
+    readonly personalApiKeyMaxDays?: number;
   },
 ): Promise<ExternalStorageProcess> {
   const child = spawn(
@@ -2776,6 +2861,10 @@ function startExternalStorageProcess(
         ARTIFACT_SERVER_OIDC_CLIENT_ID: "external-storage-integration",
         ARTIFACT_SERVER_OIDC_ISSUER: oidcProvider.issuer,
         ARTIFACT_SERVER_ORIGIN: "https://artifacts.example.com",
+        ARTIFACT_SERVER_PERSONAL_API_KEYS:
+          identity.personalApiKeyMaxDays === undefined ? "false" : "true",
+        ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS:
+          String(identity.personalApiKeyMaxDays ?? ""),
         ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "0",
         ARTIFACT_SERVER_S3_ACCESS_KEY_ID: environment.accessKey,
         ARTIFACT_SERVER_S3_BUCKET: identity.storageBucket ?? bucket,
@@ -2819,6 +2908,7 @@ async function startInProcessExternalStorageServer(
     readonly gitHistory?: NodeGitHistoryConfiguration;
     readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
     readonly externalIdentityAdmissionPolicy?: ExternalIdentityAdmissionPolicy;
+    readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
   } = {},
 ): Promise<InProcessExternalStorageServer> {
   const server = await startExternalStorageServer({

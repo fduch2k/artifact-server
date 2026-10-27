@@ -200,7 +200,7 @@ The mutation policy is separate from the read settings. A restricted artifact na
 | Change account required/public link | Yes | Only with management capability |
 | Delete the artifact | Yes | Only with management capability |
 
-An interactive agent acts as the signed-in person. An API key belongs to one named user or service principal, one installation, an expiry and revoke state, and explicit capabilities. Rotating a key replaces its credential record and secret without changing that principal or the administrator who authorized it. A key with artifact access can use any project in that installation; projects do not add a second access-control list. Every mutation records the effective principal and, when present, the human who authorized the agent connection.
+An interactive agent acts as the signed-in person. An API key belongs to one named user or service principal, one installation, an expiry and revoke state, and explicit capabilities. Rotating a key replaces its credential record and secret without changing that principal or the administrator who authorized it. A key with artifact access can use any project in that installation; projects do not add a second access-control list. Every mutation records the effective principal and, when present, the human who authorized the agent connection. A key bound to a member may hold `artifact:publish:own` and `artifact:manage:own`, which change only artifacts that member owns; when the operator opts in, members issue such personal keys themselves from their browser session ([ADR 0032](decisions/0032-personal-api-keys-and-owner-scoped-capabilities.md)).
 
 ## Versions, comparisons, and optional Git handoff
 
@@ -335,7 +335,7 @@ The detailed MCP wire and authorization contract is in [Artifact Server MCP base
 | Local, single user | Install Artifact Server and run `artifactserver connect`. There is no browser sign-in, visible token, copied key, Docker requirement, or startup-log step. |
 | Hosted or team server with compatible MCP OAuth | Add or select the server's `/mcp` address, sign in and approve in the browser, then return to the AI client. The client renews authorization automatically until it is revoked or disconnected. |
 | Private-network team server with compatible MCP OAuth | Connect to the required company network or VPN, then use the same server-address and browser-sign-in flow. Signing in does not change network access. |
-| Self-hosted server without compatible MCP OAuth | An administrator creates a scoped API key in the administration interface or administrator CLI. The developer enters it once through the AI client's secret input. Keys never come from startup logs. |
+| Self-hosted server without compatible MCP OAuth | An administrator creates a scoped API key in the administration interface or administrator CLI, or, where the operator opts in, the developer issues a personal API key from Settings that reaches only their own artifacts ([ADR 0032](decisions/0032-personal-api-keys-and-owner-scoped-capabilities.md)). The developer enters it once through the AI client's secret input. Keys never come from startup logs. |
 | CI, scripts, or unattended agents | An administrator creates a scoped service API key and stores it in the deployment's secret manager. No browser is involved. |
 
 `artifactserver connect` registers the local `artifactserver mcp` stdio bridge

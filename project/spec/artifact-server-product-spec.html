@@ -2764,7 +2764,7 @@ v12-7f3a.content.example.net</code></pre>
                 <tr><td>Local laptop</td><td>Install Artifact Server and run <code>artifactserver connect</code>. No browser, Docker, visible token, copied key, or startup-log step.</td></tr>
                 <tr><td>Hosted or team server with compatible MCP OAuth</td><td>Add the server's <code>/mcp</code> address, approve sign-in in the browser, then return to the AI client.</td></tr>
                 <tr><td>Private-network server with compatible MCP OAuth</td><td>Connect to the company network or VPN first, then use the same address and browser approval. Sign-in does not change network access.</td></tr>
-                <tr><td>Self-hosted server without compatible MCP OAuth</td><td>An administrator creates a scoped API key in an administration interface or CLI. Keys never come from startup logs.</td></tr>
+                <tr><td>Self-hosted server without compatible MCP OAuth</td><td>An administrator creates a scoped API key in an administration interface or CLI, or, where the operator opts in, the developer issues a personal API key from Settings that reaches only their own artifacts. Keys never come from startup logs.</td></tr>
                 <tr><td>CI or unattended agents</td><td>An administrator creates a scoped service key and puts it in the deployment's secret manager. No browser is involved.</td></tr>
               </tbody>
             </table>

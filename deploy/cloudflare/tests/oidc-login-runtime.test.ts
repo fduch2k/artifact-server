@@ -16,6 +16,9 @@ const clientId = "artifact-server-cloudflare";
 const assignedAddressSchema = z.object({
   port: z.number().int().positive(),
 });
+const personalSessionSchema = z.object({
+  capabilities: z.object({personalApiKeys: z.unknown()}),
+});
 const notReadySchema = z.object({
   error: z.string(),
   message: z.string(),
@@ -77,6 +80,59 @@ describe("Cloudflare Worker browser-login provider", () => {
       expect((await completeWorkerLogin(
         worker, "unlisted@attacker.test", "unlisted",
       )).status).toBe(403);
+    } finally {
+      await worker.stop();
+      await rm(directory, {force: true, recursive: true});
+    }
+  }, 120_000);
+
+  it("AUTH-034: the Worker advertises the operator's personal key policy to a signed-in member", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "artifact-server-personal-keys-"));
+    const worker = await startWorker(directory, {
+      ARTIFACT_SERVER_OIDC_AUTO_ADMIT: "true",
+      ARTIFACT_SERVER_OIDC_CLIENT_ID: clientId,
+      ARTIFACT_SERVER_OIDC_ISSUER: `${issuerOrigin}/`,
+      ARTIFACT_SERVER_PERSONAL_API_KEYS: "true",
+      ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS: "60",
+    });
+    try {
+      expect((await completeWorkerLogin(
+        worker, "administrator@example.test", "administrator",
+      )).status).toBe(303);
+      const admitted = await completeWorkerLogin(worker, "member@example.test", "member");
+      expect(admitted.status).toBe(303);
+      const cookie = admitted.headers.getSetCookie()
+        .map((entry) => entry.split(";")[0] ?? "").join("; ");
+      const session = await worker.fetch(`${origin}/api/v1/session`, {
+        headers: {Cookie: cookie},
+      });
+      expect(session.status).toBe(200);
+      expect(personalSessionSchema.parse(await session.json()).capabilities.personalApiKeys)
+        .toEqual({maxLifetimeDays: 60});
+      const keys = await worker.fetch(`${origin}/api/v1/personal-api-keys`, {
+        headers: {Cookie: cookie},
+      });
+      expect(keys.status).toBe(200);
+      expect(await keys.json()).toEqual({apiKeys: []});
+    } finally {
+      await worker.stop();
+      await rm(directory, {force: true, recursive: true});
+    }
+  }, 120_000);
+
+  it.each([
+    {ARTIFACT_SERVER_PERSONAL_API_KEYS: "yes"},
+    {ARTIFACT_SERVER_PERSONAL_API_KEYS: "true", ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS: "0"},
+  ])("AUTH-034: refuses invalid personal key configuration %j", async (settings) => {
+    const directory = await mkdtemp(join(tmpdir(), "artifact-server-personal-key-policy-"));
+    const worker = await startWorker(directory, {
+      ARTIFACT_SERVER_OIDC_CLIENT_ID: clientId,
+      ARTIFACT_SERVER_OIDC_ISSUER: issuerOrigin,
+      ...settings,
+    });
+    try {
+      const ready = await worker.fetch(`${origin}/ready`);
+      expect(ready.status).toBe(503);
     } finally {
       await worker.stop();
       await rm(directory, {force: true, recursive: true});

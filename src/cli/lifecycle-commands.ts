@@ -15,6 +15,8 @@ import {
   createOidcHostedAuthentication,
   type OidcHostedAuthentication,
 } from "../identity/oidc-hosted-authentication.js";
+import {parsePersonalApiKeyPolicy} from
+  "../identity/personal-api-key-policy.js";
 import {createOidcIdentityProvider} from
   "../identity/oidc-identity-provider.js";
 import {createWorkOsHostedAuthentication} from
@@ -352,6 +354,10 @@ function configureExternalStorageStart(
           ...oidcAuthentication,
         };
       }
+      const personalApiKeyPolicy = personalApiKeyPolicyFrom(process.env);
+      if (personalApiKeyPolicy !== null) {
+        serverConfig = {...serverConfig, personalApiKeyPolicy};
+      }
       const server = await startExternalStorageServer(serverConfig);
       const displayHostname = options.host === "0.0.0.0"
         ? "localhost"
@@ -424,7 +430,20 @@ async function startCompactServer(
       ...oidcAuthentication,
     };
   }
+  const personalApiKeyPolicy = personalApiKeyPolicyFrom(process.env);
+  if (personalApiKeyPolicy !== null) {
+    serverConfig = {...serverConfig, personalApiKeyPolicy};
+  }
   return startLocalServer(serverConfig);
+}
+
+function personalApiKeyPolicyFrom(
+  environment: NodeJS.ProcessEnv,
+): ReturnType<typeof parsePersonalApiKeyPolicy> {
+  return parsePersonalApiKeyPolicy(
+    environment["ARTIFACT_SERVER_PERSONAL_API_KEYS"],
+    environment["ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS"],
+  );
 }
 
 type OidcServerAuthentication = (

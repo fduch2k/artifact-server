@@ -24,7 +24,9 @@ export const principalCapabilities = {
   createArtifact: "artifact:create",
   issueContentSession: "content-session:issue",
   manageAnyArtifact: "artifact:manage:any",
+  manageOwnArtifact: "artifact:manage:own",
   publishAnyArtifact: "artifact:publish:any",
+  publishOwnArtifact: "artifact:publish:own",
   readArtifacts: "artifact:read",
   manageProjects: "project:manage",
   writeComments: "comment:write",
@@ -33,6 +35,25 @@ export const principalCapabilities = {
 /** One explicit capability granted to a principal. */
 export type PrincipalCapability =
   (typeof principalCapabilities)[keyof typeof principalCapabilities];
+
+/** Capabilities that reach only the artifacts the key's own member owns. */
+export const ownerScopedCapabilities: readonly PrincipalCapability[] = [
+  principalCapabilities.manageOwnArtifact,
+  principalCapabilities.publishOwnArtifact,
+];
+
+/**
+ * The most a member may grant a personal API key: everything a person does
+ * with their own artifacts, nothing that reaches another member's.
+ */
+export const personalApiKeyCapabilities: readonly PrincipalCapability[] = [
+  principalCapabilities.createArtifact,
+  principalCapabilities.issueContentSession,
+  principalCapabilities.manageOwnArtifact,
+  principalCapabilities.publishOwnArtifact,
+  principalCapabilities.readArtifacts,
+  principalCapabilities.writeComments,
+];
 
 /** A credential-independent identity used by every application operation. */
 export interface Principal {

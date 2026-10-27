@@ -126,7 +126,10 @@ import type {
   StagingStore,
 } from "../core/ports.js";
 import type {IdentityRepository} from "../core/identity-ports.js";
-import type {ExternalIdentityAdmissionPolicy} from "../core/installation-identity.js";
+import type {
+  ExternalIdentityAdmissionPolicy,
+  PersonalApiKeyPolicy,
+} from "../core/installation-identity.js";
 import type { ManifestEntry } from "../core/model.js";
 import {randomBase64Url} from "../core/random.js";
 import { FileVerificationError } from "../storage/verified-file.js";
@@ -148,6 +151,7 @@ export interface ApplicationAdapters {
   readonly blobs: BlobStore;
   readonly bootstrapAdministratorEmail: string;
   readonly externalIdentityAdmissionPolicy?: ExternalIdentityAdmissionPolicy;
+  readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
   readonly clock: Clock;
   readonly externalApiBearerVerifier: BearerCredentialVerifier | null;
   readonly externalMcpBearerVerifier: BearerCredentialVerifier | null;
@@ -919,6 +923,9 @@ export function createApplicationLayer(
   };
   if (adapters.externalIdentityAdmissionPolicy !== undefined) {
     Object.assign(identityDependencies, {externalIdentityAdmissionPolicy: adapters.externalIdentityAdmissionPolicy});
+  }
+  if (adapters.personalApiKeyPolicy !== undefined) {
+    Object.assign(identityDependencies, {personalApiKeyPolicy: adapters.personalApiKeyPolicy});
   }
   const identityLayer = InstallationAccessService.layer(identityDependencies);
   const authenticationLayer = Layer.effect(

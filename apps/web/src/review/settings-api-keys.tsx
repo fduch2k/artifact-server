@@ -33,6 +33,8 @@ const capabilities: readonly {
   { description: "Create new artifacts.", label: "Create artifacts", value: "artifact:create" },
   { description: "Publish new immutable versions.", label: "Publish versions", value: "artifact:publish:any" },
   { description: "Restore, change tags and access, or tombstone.", label: "Manage artifacts", value: "artifact:manage:any" },
+  { description: "Publish new versions of the owner's artifacts only. Member keys only.", label: "Publish own versions", value: "artifact:publish:own" },
+  { description: "Restore, tag, change access of, or delete the owner's artifacts only. Member keys only.", label: "Manage own artifacts", value: "artifact:manage:own" },
   { description: "Open account-required artifact content.", label: "Issue content sessions", value: "content-session:issue" },
   { description: "Create, rename, archive, and unarchive projects.", label: "Manage projects", value: "project:manage" },
   { description: "Register a coding agent and claim dispatched annotations.", label: "Connect agents", value: "agent:connect" },
@@ -256,12 +258,16 @@ export function ApiKeysScreen() {
                       <StatusBadge tone={apiKey.revokedAt === null ? "primary" : "danger"}>
                         {apiKey.revokedAt === null ? "Active" : "Revoked"}
                       </StatusBadge>
+                      {apiKey.authorizedByPrincipalId === apiKey.principalId
+                        ? <StatusBadge>Personal</StatusBadge>
+                        : null}
                     </div>
                     <p className="mt-2 font-mono text-xs break-all text-muted-foreground">
                       {apiKey.prefix}
                     </p>
                     <p className="mt-2 text-xs text-muted-foreground">
                       Expires {formatTimestamp(apiKey.expiresAt)}
+                      {apiKey.principalKind === "human" ? ` · Acts as ${memberLabel(members, apiKey.principalId)}` : null}
                     </p>
                   </div>
                   <div className="flex flex-wrap content-start gap-x-3 gap-y-2">
@@ -316,7 +322,15 @@ export function ApiKeysScreen() {
   );
 }
 
-function SecretDialog({
+function memberLabel(
+  members: readonly InstallationMember[],
+  memberId: string,
+): string {
+  return members.find((member) => member.id === memberId)?.email ?? "a former member";
+}
+
+/** Show a newly issued secret exactly once. */
+export function SecretDialog({
   issued,
   onDiscard,
 }: {

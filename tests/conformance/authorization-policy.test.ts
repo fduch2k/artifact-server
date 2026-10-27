@@ -57,34 +57,84 @@ describe("authorization policy", () => {
       authorization.requireArtifactRead(readerService)
     );
     await expectAllowed((authorization) =>
-      authorization.requireArtifactManagement(member)
+      authorization.requireArtifactManagement(member, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireArtifactManagement(administrator)
+      authorization.requireArtifactManagement(administrator, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireArtifactManagement(managerService)
+      authorization.requireArtifactManagement(managerService, artifact)
     );
     await expectAllowed((authorization) =>
       authorization.requireContentSession(member, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireVersionPublication(member)
+      authorization.requireVersionPublication(member, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireVersionPublication(administrator)
+      authorization.requireVersionPublication(administrator, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireVersionPublication(scopedService)
+      authorization.requireVersionPublication(scopedService, artifact)
     );
     await expectDenied((authorization) =>
-      authorization.requireVersionPublication(unscopedService)
+      authorization.requireVersionPublication(unscopedService, artifact)
     );
     await expectDenied((authorization) =>
       authorization.requireArtifactRead(unscopedService)
     );
     await expectDenied((authorization) =>
       authorization.requireArtifactListing(unscopedService).pipe(Effect.asVoid)
+    );
+  });
+
+  test("AUTH-035: owner-scoped capabilities reach only the artifacts the key's member owns", async () => {
+    expect.hasAssertions();
+    const owned = artifactFixture();
+    const colleagues = {...artifactFixture(), ownerPrincipalId: "member-colleague"};
+    const unowned = {...artifactFixture(), ownerPrincipalId: null};
+    const ownerKey = memberKeyPrincipal("member-owner", [
+      principalCapabilities.manageOwnArtifact,
+      principalCapabilities.publishOwnArtifact,
+    ]);
+    // A service principal never owns anything, whatever its id says.
+    const ownerNamedService = servicePrincipal("member-owner", [
+      principalCapabilities.manageOwnArtifact,
+      principalCapabilities.publishOwnArtifact,
+    ]);
+
+    await expectAllowed((authorization) =>
+      authorization.requireArtifactManagement(ownerKey, owned)
+    );
+    await expectAllowed((authorization) =>
+      authorization.requireVersionPublication(ownerKey, owned)
+    );
+    await expectAllowed((authorization) =>
+      authorization.requirePublicationPreparation(ownerKey)
+    );
+    await expectAllowed((authorization) =>
+      authorization.requireProjectAccess(ownerKey)
+    );
+    await Promise.all([colleagues, unowned].flatMap((artifact) => [
+      expectDenied((authorization) =>
+        authorization.requireArtifactManagement(ownerKey, artifact)
+      ),
+      expectDenied((authorization) =>
+        authorization.requireVersionPublication(ownerKey, artifact)
+      ),
+    ]));
+    await expectDenied((authorization) =>
+      authorization.requireArtifactManagement(ownerNamedService, owned)
+    );
+    await expectDenied((authorization) =>
+      authorization.requireVersionPublication(ownerNamedService, owned)
+    );
+    // Owning an artifact is not a grant to read or create without the capability.
+    await expectDenied((authorization) =>
+      authorization.requireArtifactRead(ownerKey)
+    );
+    await expectDenied((authorization) =>
+      authorization.requireArtifactCreation(ownerKey)
     );
   });
 
@@ -206,6 +256,21 @@ function humanPrincipal(
     installationId: "installation-a",
     kind: principalKinds.human,
     membershipRole,
+  };
+}
+
+function memberKeyPrincipal(
+  id: string,
+  capabilities: Principal["capabilities"],
+): Principal {
+  return {
+    authorizedByPrincipalId: "administrator",
+    capabilities,
+    displayName: "Policy member key",
+    id,
+    installationId: "installation-a",
+    kind: principalKinds.human,
+    membershipRole: membershipRoles.member,
   };
 }
 

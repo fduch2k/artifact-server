@@ -8,7 +8,10 @@ import type {
 import type {InteractiveIdentityProvider} from "../application/interactive-login.js";
 import type {Clock} from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
-import type {ExternalIdentityAdmissionPolicy} from "../core/installation-identity.js";
+import type {
+  ExternalIdentityAdmissionPolicy,
+  PersonalApiKeyPolicy,
+} from "../core/installation-identity.js";
 import {SystemClock, SystemIdGenerator} from "../core/system.js";
 import {createHttpApp} from "../http/create-http-app.js";
 import type {
@@ -72,6 +75,8 @@ export interface ExternalStorageRuntimeConfig {
   readonly applicationOrigin?: string;
   readonly bootstrapAdministratorEmail: string;
   readonly externalIdentityAdmissionPolicy?: ExternalIdentityAdmissionPolicy;
+  /** Members may issue their own owner-scoped API keys; absent leaves it to administrators. */
+  readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
   readonly browserAccess: Extract<BrowserAccess, {readonly mode: "private_team"}>;
   readonly clock?: Clock;
   readonly completedRequestLogSampleRate?: number;
@@ -183,6 +188,9 @@ export async function createExternalStorageRuntime(
     if (config.externalIdentityAdmissionPolicy !== undefined) {
       Object.assign(applicationAdapters, {externalIdentityAdmissionPolicy: config.externalIdentityAdmissionPolicy});
     }
+    if (config.personalApiKeyPolicy !== undefined) {
+      Object.assign(applicationAdapters, {personalApiKeyPolicy: config.personalApiKeyPolicy});
+    }
     if (gitHistoryProvider !== null) {
       Object.assign(applicationAdapters, {gitHistoryProvider});
     }
@@ -238,6 +246,7 @@ export async function createExternalStorageRuntime(
       contentDomain: config.contentDomain,
       gitHistory: gitHistoryMonitor?.reader ??
         fixedGitHistoryCapabilityReader(gitHistory.capability),
+      personalApiKeyPolicy: config.personalApiKeyPolicy ?? null,
       readiness: () => externalStorageReadiness(database, connectedObjectStorage),
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(),

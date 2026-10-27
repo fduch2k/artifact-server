@@ -52,6 +52,12 @@ export interface ExternalIdentityAdmissionPolicy {
   readonly provider: string;
 }
 
+/** Optional self-service issuance of personal API keys by signed-in members. */
+export interface PersonalApiKeyPolicy {
+  /** The longest lifetime one personal key may have, in whole days. */
+  readonly maxLifetimeDays: number;
+}
+
 /** One server-side browser session after its opaque credential is verified. */
 export interface ApplicationSession {
   readonly createdAt: string;

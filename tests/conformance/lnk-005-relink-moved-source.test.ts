@@ -13,6 +13,7 @@ import path from "node:path";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {z} from "zod";
 
+import {signInAdministrator} from "../support/agent-dispatch.js";
 import {
   apiHeaders,
   createTestInstallation,
@@ -253,6 +254,54 @@ describe("relinking one binding at a moved source file", () => {
     expect(new TextDecoder().decode(
       await deliveredBytes(linked.artifact.id, linked.version.id),
     )).toBe(linkedBytes);
+  });
+
+  test("AUTH-035: an owner-scoped key cannot relink an artifact its member does not own", async () => {
+    expect.hasAssertions();
+    // The local API token links the file, so no member owns the artifact.
+    const linked = await linkFile(sourcePath, "lnk-005-owner-link-000");
+    const administrator = await signInAdministrator(requiredServer(), installation);
+    const browserHeaders = new Headers({
+      "Content-Type": "application/json",
+      Cookie: administrator.header,
+      Origin: requiredServer().baseUrl,
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "X-CSRF-Token": administrator.csrf,
+    });
+    const admitted = await fetch(new URL("/api/v1/members", requiredServer().baseUrl), {
+      body: JSON.stringify({displayName: "Ada", email: "ada@example.test"}),
+      headers: browserHeaders,
+      method: "POST",
+    });
+    expect(admitted.status).toBe(201);
+    const memberId = z.object({member: z.object({id: z.string()})})
+      .parse(await admitted.json()).member.id;
+    const issued = await fetch(new URL("/api/v1/api-keys", requiredServer().baseUrl), {
+      body: JSON.stringify({
+        capabilities: ["artifact:publish:own", "artifact:read"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        memberId,
+        name: "Ada's agent",
+      }),
+      headers: browserHeaders,
+      method: "POST",
+    });
+    expect(issued.status).toBe(201);
+    const memberToken = z.object({token: z.string()}).parse(await issued.json()).token;
+
+    const movedPath = path.join(sourceRoot, "moved-roadmap.md");
+    await rename(sourcePath, movedPath);
+    const refused = await fetch(
+      new URL(`/api/v1/artifacts/${linked.artifact.id}/source`, requiredServer().baseUrl),
+      {
+        body: JSON.stringify({expectedSha256: digestOf(linkedBytes), path: movedPath}),
+        headers: apiHeaders({...installation, apiToken: memberToken}, "lnk-005-owner-relink-00"),
+        method: "PUT",
+      },
+    );
+    expect(refused.status).toBe(403);
+    expect((await readArtifactBinding(linked.artifact.id)).path).toBe(sourcePath);
   });
 
   function requiredServer(): RunningTestServer {
