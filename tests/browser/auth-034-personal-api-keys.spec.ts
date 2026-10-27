@@ -40,6 +40,10 @@ test.describe("Personal API keys in settings", () => {
       await expect(dialog.getByText("Manage artifacts", {exact: true})).toHaveCount(0);
       await expect(dialog.getByRole("button", {name: "Issue personal key"})).toBeDisabled();
       await dialog.getByLabel("Name").fill("Laptop agent");
+      // The submit button fades in once enabled; judge contrast after it settles.
+      await dialog.evaluate((element) => Promise.all(
+        element.getAnimations({subtree: true}).map((animation) => animation.finished),
+      ));
       const issueAccessibility = await new AxeBuilder({page: fixture.page})
         .exclude("[data-base-ui-focus-guard]")
         .withTags(["wcag2a", "wcag2aa"])
