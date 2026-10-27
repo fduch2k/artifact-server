@@ -7,6 +7,7 @@ Stop on uncertainty. Do not turn a failed or partial request into a success repo
 - Inspect CLI profiles with `artifactserver auth status`; it does not print credentials.
 - If a remote CLI profile is missing, ask the user to run `artifactserver auth login <server>` or guide them through that browser flow. Do not ask them to paste a token into chat.
 - If a self-hosted server uses an administrator-issued API key, the human stores it through `artifactserver auth login <server> --api-key-stdin`. Do not type or echo the key for them.
+- If the server offers personal API keys, the human issues one in **Settings → Personal API keys** and stores it the same way. A personal key reaches only that person's own artifacts: a refusal to publish to, tag, or delete someone else's artifact is expected, not a fault to work around.
 - If MCP is disconnected, tell the user to connect the selected Artifact Server. Do not fall back to an unrelated server.
 
 ## Target and project failures

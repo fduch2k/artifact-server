@@ -31,19 +31,25 @@ import {
   type ManagedApiKey,
   type MemberDirectoryEntry,
   memberStatuses,
+  type PersonalApiKeyPolicy,
   type StoredManagedApiKey,
 } from "../core/installation-identity.js";
 import {
+  isDirectHumanPrincipal,
   isHumanAdministrator,
   membershipRoles,
+  ownerScopedCapabilities,
+  personalApiKeyCapabilities,
   principalCapabilities,
   principalKinds,
   type MembershipRole,
   type Principal,
   type PrincipalCapability,
+  type PrincipalKind,
 } from "../core/identity.js";
 
 const allCapabilities = Object.values(principalCapabilities);
+const millisecondsPerDay = 24 * 60 * 60 * 1_000;
 const localBrowserLoginProvider = "artifact-server-local";
 
 export interface InstallationIdentityRepository {
@@ -188,6 +194,8 @@ export interface InstallationAccessDependencies {
   readonly installationId: string;
   readonly localBootstrapCredential: Redacted.Redacted | null;
   readonly localLoginAttemptLifetimeMilliseconds: number;
+  /** Members may issue their own owner-scoped keys; absent keeps issuance with administrators. */
+  readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
   /** Keep the installation's local-owner member permanently active. */
   readonly protectBootstrapAdministrator: boolean;
   readonly repository: InstallationIdentityRepository;
@@ -206,6 +214,14 @@ export interface IssueApiKeyCommand {
   readonly capabilities: readonly PrincipalCapability[];
   readonly expiresAt: string;
   readonly memberId?: string;
+  readonly name: string;
+  readonly principal: Principal;
+}
+
+/** A signed-in member's request for a key that acts as themselves. */
+export interface IssuePersonalApiKeyCommand {
+  readonly capabilities: readonly PrincipalCapability[];
+  readonly expiresAt: string;
   readonly name: string;
   readonly principal: Principal;
 }
@@ -269,6 +285,28 @@ export interface InstallationAccessOperations {
   readonly listApiKeys: (
     principal: Principal,
   ) => Effect.Effect<readonly ManagedApiKey[], AuthorizationDenied | IdentityRepositoryFailure>;
+  /** A signed-in member issues an owner-scoped key that acts as themselves. */
+  readonly issuePersonalApiKey: (
+    command: IssuePersonalApiKeyCommand,
+  ) => Effect.Effect<
+    IssuedManagedApiKey,
+    | AuthorizationDenied
+    | IdentityConflict
+    | IdentityNotFound
+    | IdentityRepositoryFailure
+  >;
+  /** Every key that acts as the signed-in member, whoever issued it. */
+  readonly listPersonalApiKeys: (
+    principal: Principal,
+  ) => Effect.Effect<readonly ManagedApiKey[], AuthorizationDenied | IdentityRepositoryFailure>;
+  /** The signed-in member revokes one key that acts as themselves. */
+  readonly revokePersonalApiKey: (
+    principal: Principal,
+    keyId: string,
+  ) => Effect.Effect<
+    ManagedApiKey,
+    AuthorizationDenied | IdentityNotFound | IdentityRepositoryFailure
+  >;
   readonly listMembers: (
     principal: Principal,
   ) => Effect.Effect<
@@ -733,6 +771,55 @@ function makeInstallationAccessService(
     return member;
   });
 
+  const createApiKey = Effect.fn(
+    "InstallationAccessService.createApiKey",
+  )(function*(command: {
+    readonly authorizedByPrincipalId: string;
+    readonly capabilities: readonly PrincipalCapability[];
+    readonly expiresAt: string;
+    readonly memberId: string | null;
+    readonly name: string;
+  }) {
+    const id = dependencies.ids.apiKeyId();
+    const secret = dependencies.secrets.issue();
+    const token = `as_key_${id}_${secret}`;
+    const principalKind: PrincipalKind = command.memberId === null
+      ? principalKinds.service
+      : principalKinds.human;
+    const key: StoredManagedApiKey = {
+      authorizedByPrincipalId: command.authorizedByPrincipalId,
+      capabilities: command.capabilities,
+      createdAt: dependencies.clock.now().toISOString(),
+      expiresAt: command.expiresAt,
+      id,
+      installationId: dependencies.installationId,
+      name: command.name,
+      prefix: token.slice(0, Math.min(token.length, 32)),
+      principalId: command.memberId ?? `service:${id}`,
+      principalKind,
+      revokedAt: null,
+      rotatedFromId: null,
+      secretDigest: dependencies.secrets.digest(token),
+    };
+    const apiKey = yield* dependencies.repository.createApiKey(key);
+    return {apiKey, token};
+  });
+
+  const requireActiveMember = Effect.fn(
+    "InstallationAccessService.requireActiveMember",
+  )(function*(memberId: string) {
+    const member = yield* dependencies.repository.findMember(
+      dependencies.installationId,
+      memberId,
+    );
+    if (member?.status !== memberStatuses.active) {
+      return yield* new IdentityNotFound({
+        message: "The active member for this API key does not exist.",
+      });
+    }
+    return member;
+  });
+
   const issueApiKey = Effect.fn(
     "InstallationAccessService.issueApiKey",
   )(function*(command: IssueApiKeyCommand) {
@@ -743,37 +830,25 @@ function makeInstallationAccessService(
       dependencies.clock.now(),
     );
     const name = yield* requireText(command.name, "API key name");
-    const id = dependencies.ids.apiKeyId();
-    const secret = dependencies.secrets.issue();
-    const token = `as_key_${id}_${secret}`;
     const member = command.memberId === undefined
       ? null
-      : yield* dependencies.repository.findMember(
-        dependencies.installationId,
-        command.memberId,
-      );
-    if (command.memberId !== undefined && member?.status !== memberStatuses.active) {
-      return yield* Effect.fail(new IdentityNotFound({
-        message: "The active member for this API key does not exist.",
-      }));
+      : yield* requireActiveMember(command.memberId);
+    // A service principal owns nothing, so an owner-scoped capability would be inert.
+    if (
+      member === null &&
+      capabilities.some((capability) => ownerScopedCapabilities.includes(capability))
+    ) {
+      return yield* new IdentityConflict({
+        message: "Owner-scoped capabilities need an API key bound to a member.",
+      });
     }
-    const key: StoredManagedApiKey = {
+    return yield* createApiKey({
       authorizedByPrincipalId: command.principal.id,
       capabilities,
-      createdAt: dependencies.clock.now().toISOString(),
       expiresAt,
-      id,
-      installationId: dependencies.installationId,
+      memberId: member?.id ?? null,
       name,
-      prefix: token.slice(0, Math.min(token.length, 32)),
-      principalId: member?.id ?? `service:${id}`,
-      principalKind: member === null ? principalKinds.service : principalKinds.human,
-      revokedAt: null,
-      rotatedFromId: null,
-      secretDigest: dependencies.secrets.digest(token),
-    };
-    const apiKey = yield* dependencies.repository.createApiKey(key);
-    return {apiKey, token};
+    });
   });
 
   const listApiKeys = Effect.fn(
@@ -781,6 +856,76 @@ function makeInstallationAccessService(
   )(function*(principal: Principal) {
     yield* requireAdministrator(principal, dependencies.installationId);
     return yield* dependencies.repository.listApiKeys(dependencies.installationId);
+  });
+
+  // Only a person's own session may mint a key in their name, so a leaked key
+  // cannot issue its own successor and outlive revocation.
+  const issuePersonalApiKey = Effect.fn(
+    "InstallationAccessService.issuePersonalApiKey",
+  )(function*(command: IssuePersonalApiKeyCommand) {
+    yield* requireSignedInMember(command.principal, dependencies.installationId);
+    const policy = dependencies.personalApiKeyPolicy;
+    if (policy === undefined) {
+      return yield* new AuthorizationDenied({
+        message: "Personal API keys are not enabled on this Artifact Server.",
+      });
+    }
+    const capabilities = yield* normalizeCapabilities(command.capabilities);
+    if (
+      capabilities.some((capability) => !personalApiKeyCapabilities.includes(capability))
+    ) {
+      return yield* new AuthorizationDenied({
+        message: `A personal API key can hold only ${personalApiKeyCapabilities.join(", ")}.`,
+      });
+    }
+    const now = dependencies.clock.now();
+    const expiresAt = yield* requireFutureDate(command.expiresAt, now);
+    if (
+      new Date(expiresAt).getTime() >
+        now.getTime() + policy.maxLifetimeDays * millisecondsPerDay
+    ) {
+      return yield* new IdentityConflict({
+        message: `A personal API key must expire within ${policy.maxLifetimeDays} days.`,
+      });
+    }
+    const name = yield* requireText(command.name, "API key name");
+    const member = yield* requireActiveMember(command.principal.id);
+    return yield* createApiKey({
+      authorizedByPrincipalId: member.id,
+      capabilities,
+      expiresAt,
+      memberId: member.id,
+      name,
+    });
+  });
+
+  const listPersonalApiKeys = Effect.fn(
+    "InstallationAccessService.listPersonalApiKeys",
+  )(function*(principal: Principal) {
+    yield* requireSignedInMember(principal, dependencies.installationId);
+    const keys = yield* dependencies.repository.listApiKeys(dependencies.installationId);
+    return keys.filter((key) => actsAs(key, principal.id));
+  });
+
+  const revokePersonalApiKey = Effect.fn(
+    "InstallationAccessService.revokePersonalApiKey",
+  )(function*(principal: Principal, keyId: string) {
+    yield* requireSignedInMember(principal, dependencies.installationId);
+    const key = yield* dependencies.repository.findApiKey(
+      dependencies.installationId,
+      keyId,
+    );
+    // Another member's key reads exactly like a missing one.
+    if (key === null || !actsAs(key, principal.id)) {
+      return yield* new IdentityNotFound({message: "The API key does not exist."});
+    }
+    const revoked = yield* dependencies.repository.revokeApiKey(
+      dependencies.installationId,
+      keyId,
+      dependencies.clock.now().toISOString(),
+    );
+    apiKeyCache?.clear();
+    return revoked;
   });
 
   const revokeApiKey = Effect.fn(
@@ -861,13 +1006,16 @@ function makeInstallationAccessService(
     deactivateMember,
     issueApiKey,
     issueLocalBrowserLogin,
+    issuePersonalApiKey,
     loginAsLocalOwner,
     findActiveMember,
     listApiKeys,
     listMemberDirectory,
     listMembers,
+    listPersonalApiKeys,
     loginWithLocalBrowserToken,
     revokeApiKey,
+    revokePersonalApiKey,
     revokeSession,
     rotateApiKey,
   });
@@ -899,6 +1047,23 @@ function requireAdministrator(
     : Effect.fail(new AuthorizationDenied({
       message: "An Artifact Server administrator is required.",
     }));
+}
+
+function requireSignedInMember(
+  principal: Principal,
+  installationId: string,
+): Effect.Effect<void, AuthorizationDenied> {
+  return principal.installationId === installationId &&
+      isDirectHumanPrincipal(principal)
+    ? Effect.void
+    : Effect.fail(new AuthorizationDenied({
+      message: "Personal API keys are managed from a signed-in browser session.",
+    }));
+}
+
+/** Report whether a key authenticates as one member, whoever issued it. */
+function actsAs(key: ManagedApiKey, memberId: string): boolean {
+  return key.principalKind === principalKinds.human && key.principalId === memberId;
 }
 
 function invalidApiKey(): Effect.Effect<never, AuthenticationRequired> {

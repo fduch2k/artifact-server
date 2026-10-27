@@ -10,7 +10,14 @@ type CopyTarget = "doctor" | "local" | "remote" | "skill";
 const copiedResetMilliseconds = 1_600;
 
 /** Explain the supported local and team MCP connection paths for this installation. */
-export function McpScreen({administrator}: {readonly administrator: boolean}) {
+export function McpScreen({
+  administrator,
+  personalApiKeys,
+}: {
+  readonly administrator: boolean;
+  /** The signed-in member may issue a key that acts as themselves. */
+  readonly personalApiKeys: boolean;
+}) {
   const [copiedTarget, setCopiedTarget] = useState<CopyTarget | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const copiedResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,9 +90,15 @@ export function McpScreen({administrator}: {readonly administrator: boolean}) {
             value={mcpAddress}
           />
           <p className="text-xs leading-5 text-muted-foreground text-pretty">
-            If the client cannot use browser authentication, ask an administrator for a scoped
-            API key. Never paste a key into chat.
+            {personalApiKeys
+              ? "If the client cannot use browser authentication, issue a personal API key. It acts as you and reaches only your own artifacts. Never paste a key into chat."
+              : "If the client cannot use browser authentication, ask an administrator for a scoped API key. Never paste a key into chat."}
           </p>
+          {personalApiKeys ? (
+            <ButtonLink className="justify-self-start" href="/review/settings/personal-api-keys" size="xs" variant="outline">
+              Personal API keys
+            </ButtonLink>
+          ) : null}
           {administrator ? (
             <ButtonLink className="justify-self-start" href="/review/settings/api-keys" size="xs" variant="outline">
               Manage API keys

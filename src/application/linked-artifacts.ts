@@ -22,6 +22,7 @@ import {
   type SourceUnreadable,
   type StagingStorageFailure,
 } from "../core/errors.js";
+import { requireArtifactVisible } from "../core/artifact-visibility.js";
 import type { Principal } from "../core/identity.js";
 import {
   accessSettings,
@@ -698,12 +699,34 @@ function makeLinkedArtifactService(
     }
   });
 
+  // Capture and relink act on one artifact, so an owner-scoped key is checked
+  // against that artifact's owner before its linked source is touched.
+  const requireVersionPublisher = Effect.fn(
+    "LinkedArtifactService.requireVersionPublisher",
+  )(function*(principal: Principal, projectId: string, artifactId: string) {
+    const current = yield* dependencies.publication.findCurrentVersion(
+      projectId,
+      artifactId,
+    );
+    if (current === null) {
+      return yield* new ArtifactNotFound({
+        message: "The artifact does not exist.",
+      });
+    }
+    yield* requireArtifactVisible(principal, current.artifact);
+    return yield* authorization.requireVersionPublication(principal, current.artifact);
+  });
+
   const captureArtifact = Effect.fn("LinkedArtifactService.captureArtifact")(
     function*(command: CaptureArtifactCommand) {
-      yield* authorization.requireVersionPublication(command.principal);
       const project = yield* resolveProject(
         command.principal,
         command.projectId,
+      );
+      yield* requireVersionPublisher(
+        command.principal,
+        project.id,
+        command.artifactId,
       );
       const binding = yield* requireBinding(project.id, command.artifactId);
       const observation = yield* runEngine(() =>
@@ -772,10 +795,14 @@ function makeLinkedArtifactService(
 
   const relinkArtifact = Effect.fn("LinkedArtifactService.relinkArtifact")(
     function*(command: RelinkArtifactCommand) {
-      yield* authorization.requireVersionPublication(command.principal);
       const project = yield* resolveProject(
         command.principal,
         command.projectId,
+      );
+      yield* requireVersionPublisher(
+        command.principal,
+        project.id,
+        command.artifactId,
       );
       yield* requireBinding(project.id, command.artifactId);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);

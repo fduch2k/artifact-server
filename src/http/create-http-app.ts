@@ -78,7 +78,10 @@ import {
   isArtifactServerFailure,
   VersionNotFound,
 } from "../core/errors.js";
-import type { IssuedApplicationSession } from "../core/installation-identity.js";
+import type {
+  IssuedApplicationSession,
+  PersonalApiKeyPolicy,
+} from "../core/installation-identity.js";
 import {
   browserAccessModes,
   type BrowserAccess,
@@ -423,8 +426,10 @@ const principalCapabilitySchema = z.enum([
   principalCapabilities.createArtifact,
   principalCapabilities.issueContentSession,
   principalCapabilities.manageAnyArtifact,
+  principalCapabilities.manageOwnArtifact,
   principalCapabilities.manageProjects,
   principalCapabilities.publishAnyArtifact,
+  principalCapabilities.publishOwnArtifact,
   principalCapabilities.readArtifacts,
   principalCapabilities.writeComments,
 ]);
@@ -434,6 +439,8 @@ const issueApiKeySchema = z.object({
   memberId: z.string().trim().min(1).max(200).optional(),
   name: z.string().trim().min(1).max(200),
 });
+// A personal key always acts as the signed-in member, so it names no member.
+const issuePersonalApiKeySchema = issueApiKeySchema.omit({memberId: true}).strict();
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
@@ -489,6 +496,11 @@ export interface HttpAppDependencies {
    */
   readonly linkedArtifacts?: boolean;
   readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
+  /**
+   * Advertises member self-service personal API keys. The application service
+   * enforces the policy; this only shapes discovery for the settings screen.
+   */
+  readonly personalApiKeyPolicy?: PersonalApiKeyPolicy | null;
   readonly readiness?: ReadinessProbe;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly trustedApplicationOrigin: string | null;
@@ -1021,6 +1033,7 @@ export function createHttpApp(
       capabilities: {
         gitHistory: gitHistory.read(),
         linkedArtifacts: dependencies.linkedArtifacts === true,
+        personalApiKeys: dependencies.personalApiKeyPolicy ?? null,
       },
       principal: context.get("principal"),
     }));
@@ -1158,6 +1171,48 @@ export function createHttpApp(
       ),
     );
     return context.json(issued, 201);
+  });
+
+  app.get("/api/v1/personal-api-keys", async (context) => {
+    const apiKeys = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      InstallationAccessService.use((access) =>
+        access.listPersonalApiKeys(context.get("principal"))
+      ),
+    );
+    return context.json({apiKeys});
+  });
+
+  app.post("/api/v1/personal-api-keys", boundedJsonBody, async (context) => {
+    const body = issuePersonalApiKeySchema.parse(await context.req.json());
+    const issued = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      InstallationAccessService.use((access) =>
+        access.issuePersonalApiKey({
+          capabilities: body.capabilities,
+          expiresAt: body.expiresAt,
+          name: body.name,
+          principal: context.get("principal"),
+        })
+      ),
+    );
+    return context.json(issued, 201);
+  });
+
+  app.post("/api/v1/personal-api-keys/:keyId/revoke", async (context) => {
+    const apiKey = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      InstallationAccessService.use((access) =>
+        access.revokePersonalApiKey(
+          context.get("principal"),
+          context.req.param("keyId"),
+        )
+      ),
+    );
+    return context.json({apiKey});
   });
 
   app.get("/api/v1/administration/public-links", async (context) => {

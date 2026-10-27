@@ -80,7 +80,8 @@ export function restrictedArtifactScope(
   return {kind: "none"};
 }
 
-function ownsArtifact(
+/** Report whether a person, directly or through their own key, owns an artifact. */
+export function ownsArtifact(
   principal: Principal,
   artifact: Pick<ArtifactRecord, "ownerPrincipalId">,
 ): boolean {

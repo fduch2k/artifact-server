@@ -307,6 +307,7 @@ function makePublishArtifactService(
     yield* requireArtifactVisible(command.principal, current.artifact);
     yield* authorization.requireVersionPublication(
       command.principal,
+      current.artifact,
     );
     // Members a restricted artifact is shared with read it; they do not publish.
     yield* requireArtifactChangeable(command.principal, current.artifact);

@@ -45,6 +45,8 @@ import {
 } from "../../../src/identity/oidc-identity-provider.js";
 import {createWorkOsHostedAuthentication} from
   "../../../src/identity/workos-hosted-authentication.js";
+import {parsePersonalApiKeyPolicy} from
+  "../../../src/identity/personal-api-key-policy.js";
 import {parseOidcAdmissionPolicy} from
   "../../../src/identity/oidc-admission-policy.js";
 
@@ -66,6 +68,8 @@ export interface WorkerEnvironment {
   readonly ARTIFACT_SERVER_OIDC_ISSUER?: string;
   readonly ARTIFACT_SERVER_OIDC_SCOPES?: string;
   readonly ARTIFACT_SERVER_ORIGIN: string;
+  readonly ARTIFACT_SERVER_PERSONAL_API_KEYS?: string;
+  readonly ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS?: string;
   readonly ARTIFACT_SERVER_QUALIFICATION_MODE?: "enabled";
   readonly ARTIFACT_SERVER_R2_BUCKET: R2Bucket;
   readonly ARTIFACT_SERVER_REQUEST_LOG_SAMPLE_RATE?: string | number;
@@ -153,6 +157,10 @@ async function createCloudflareRuntime(
       environment.ARTIFACT_SERVER_OIDC_AUTO_ADMIT,
       environment.ARTIFACT_SERVER_OIDC_ALLOWED_EMAIL_DOMAINS,
     );
+  const personalApiKeyPolicy = parsePersonalApiKeyPolicy(
+    environment.ARTIFACT_SERVER_PERSONAL_API_KEYS,
+    environment.ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS,
+  );
   await migrateD1(
     environment.ARTIFACT_SERVER_D1_DATABASE,
     environment.ARTIFACT_SERVER_INSTALLATION_ID,
@@ -204,6 +212,9 @@ async function createCloudflareRuntime(
       externalIdentityAdmissionPolicy: admissionPolicy,
     });
   }
+  if (personalApiKeyPolicy !== null) {
+    Object.assign(applicationAdapters, {personalApiKeyPolicy});
+  }
   if (gitHistory.provider !== null) {
     Object.assign(applicationAdapters, {gitHistoryProvider: gitHistory.provider});
   }
@@ -220,6 +231,7 @@ async function createCloudflareRuntime(
     completedRequestLogSampleRate: requestLogSampleRate(environment),
     contentDomain: environment.ARTIFACT_SERVER_CONTENT_DOMAIN,
     gitHistory: gitHistory.capability,
+    personalApiKeyPolicy,
     readiness: () => readiness(environment),
     trustedApplicationOrigin: origin.origin,
     webAssets: {

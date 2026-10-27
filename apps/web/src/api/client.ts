@@ -9,7 +9,9 @@ const capabilitySchema = z.enum([
   "comment:write",
   "content-session:issue",
   "artifact:manage:any",
+  "artifact:manage:own",
   "artifact:publish:any",
+  "artifact:publish:own",
   "artifact:read",
   "project:manage",
 ]);
@@ -62,9 +64,14 @@ const gitHistoryCapabilitySchema = z.object({
 const deploymentCapabilitiesSchema = z.object({
   gitHistory: gitHistoryCapabilitySchema.default(disabledGitHistoryCapability),
   linkedArtifacts: z.boolean(),
+  /** Members may issue their own owner-scoped API keys up to this lifetime. */
+  personalApiKeys: z.object({
+    maxLifetimeDays: z.number().int().positive(),
+  }).nullable().default(null),
 }).default({
   gitHistory: disabledGitHistoryCapability,
   linkedArtifacts: false,
+  personalApiKeys: null,
 });
 
 const sessionSchema = z.object({
@@ -1392,6 +1399,29 @@ export const api = {
   revokeApiKey: (keyId: string) => request(
     z.object({ apiKey: apiKeySchema }),
     `/api/v1/api-keys/${encodeURIComponent(keyId)}/revoke`,
+    { headers: mutationHeaders(), method: "POST" },
+  ).then(({ apiKey }) => apiKey),
+  /** Every key that acts as the signed-in member, whoever issued it. */
+  personalApiKeys: () => request(
+    z.object({ apiKeys: z.array(apiKeySchema) }),
+    "/api/v1/personal-api-keys",
+  ).then(({ apiKeys }) => apiKeys),
+  issuePersonalApiKey: (
+    name: string,
+    expiresAt: string,
+    capabilities: readonly PrincipalCapability[],
+  ) => request(
+    issuedKeySchema,
+    "/api/v1/personal-api-keys",
+    {
+      body: JSON.stringify({ capabilities, expiresAt, name }),
+      headers: mutationHeaders(),
+      method: "POST",
+    },
+  ),
+  revokePersonalApiKey: (keyId: string) => request(
+    z.object({ apiKey: apiKeySchema }),
+    `/api/v1/personal-api-keys/${encodeURIComponent(keyId)}/revoke`,
     { headers: mutationHeaders(), method: "POST" },
   ).then(({ apiKey }) => apiKey),
   /** The registered agents with their derived presence, for live surfaces. */

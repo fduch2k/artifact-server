@@ -69,7 +69,9 @@ prove an install-to-use team workflow behind real TLS and wildcard routing.
 - Tailscale identity headers and any other private-network identity adapter;
 - an embedded identity provider, passwords, passkeys, or email magic links;
 - SCIM, directory sync, group-to-role mapping, and automatic member creation;
-- self-service personal API-key issuance by non-administrator members;
+- self-service personal API-key issuance by non-administrator members (an
+  opt-in form is now specified in
+  [ADR 0032](decisions/0032-personal-api-keys-and-owner-scoped-capabilities.md));
 - MCP OAuth for a generic browser-only OIDC provider;
 - public sign-up, invitations sent by Artifact Server, and an organization
   switcher;

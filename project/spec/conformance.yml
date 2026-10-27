@@ -1771,6 +1771,34 @@ requirements:
     depends_on: [AUTH-030, AUTH-031]
     evidence: []
 
+  - id: AUTH-034
+    kind: security
+    behavior: When the operator opts in, a signed-in member issues, lists, and revokes API keys that act as themselves, within a fixed capability ceiling and the operator's longest lifetime; a key cannot mint, list, or revoke keys, another member's key reads as missing, and deactivating the member revokes every key that acts as them.
+    owner: authorization
+    source: {file: decisions/0032-personal-api-keys-and-owner-scoped-capabilities.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-034-B, description: "A member's browser session issues a personal key with the owner-scoped ceiling that authenticates as that member, the member's list shows it and any administrator-issued key bound to them, administrators see it, the session advertises the operator's longest lifetime, revoking either key ends it at once, compact serving and the Worker read the two settings from the environment, and the Settings screen issues, shows once, and revokes a key."}
+      failure: {id: AUTH-034-F, description: "Capabilities beyond the ceiling are refused with AUTHORIZATION_DENIED and lifetimes past the operator's limit or in the past with IDENTITY_CONFLICT, a request naming another member is malformed, none of them creates a key; a key cannot list, issue, or reach administrator key routes; another member's revocation answers not found and leaves the key working; deactivation revokes the key; with the setting off, issuance is refused and discovery reports null; malformed settings fail startup."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-034-B and AUTH-034-F run against the local SQLite server, through the compact CLI start, and in a browser test of the Settings screen; the Postgres runtime test issues a key on one replica, uses it on another, and revokes it there. The Worker test proves discovery, listing, and malformed settings on D1, but browser-session mutations do not pass the local Worker harness, so issuance and revocation on D1 have no test. No deployment-specific evidence is recorded.
+    depends_on: [AUTH-008, AUTH-009, AUTH-030]
+    evidence: []
+
+  - id: AUTH-035
+    kind: security
+    behavior: The artifact:publish:own and artifact:manage:own capabilities let a member-bound key publish, capture, relink, restore, tag, change access of, share, delete, and read the history of only the artifacts its member owns, and are refused on service keys.
+    owner: authorization
+    source: {file: decisions/0032-personal-api-keys-and-owner-scoped-capabilities.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-035-B, description: "A key holding both owner-scoped capabilities publishes a new version of, tags, changes access of, restores, and deletes an artifact its member created, and the policy allows its member's artifacts while it prepares uploads and discovers projects."}
+      failure: {id: AUTH-035-F, description: "Personal and administrator-issued member keys with the owner-scoped capabilities cannot publish to, tag, change access of, restore, delete, or relink a colleague's artifact or one no member owns, and the artifact is unchanged; a service principal never counts as an owner; without the owner-scoped capability a key cannot change even its own artifact; owning an artifact grants no reading or creation without the capability."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-035-B and AUTH-035-F run against the local SQLite server and the authorization policy; the checks live in the backend-independent application layer, and the Postgres runtime test proves the capabilities round-trip through that backend. No deployment-specific evidence is recorded.
+    depends_on: [AUTH-008, AUTH-030]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.
