@@ -1452,7 +1452,7 @@ test.describe("Artifact Server frontend MVP", () => {
       await closeTopDialog(fixture.page);
       await expect(memberRow.getByText("inactive", {exact: true})).toBeVisible();
 
-      await fixture.page.getByRole("link", {name: "API keys"}).click();
+      await fixture.page.getByRole("link", {exact: true, name: "API keys"}).click();
       await fixture.page.getByRole("button", {name: "Issue API key"}).click();
       await fixture.page
         .getByRole("textbox", {name: "Name", exact: true})
