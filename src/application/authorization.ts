@@ -7,7 +7,6 @@ import {
   isDirectHumanPrincipal,
   isHumanAdministrator,
   principalCapabilities,
-  principalKinds,
   type Principal,
 } from "../core/identity.js";
 import type { ArtifactRecord } from "../core/model.js";
@@ -108,13 +107,14 @@ function makeAuthorizationService(
   });
 
   // Direct humans are not agents: the registry, claim, and report surface is
-  // reserved for service principals holding the agent connection capability.
+  // reserved for API keys holding the agent connection capability. A key bound
+  // to a member registers agents that belong to that member.
   const requireAgentConnection = Effect.fn(
     "AuthorizationService.requireAgentConnection",
   )(function*(principal: Principal) {
     yield* requireInstallation(principal);
     if (
-      principal.kind === principalKinds.service &&
+      !isDirectHumanPrincipal(principal) &&
       hasCapability(principal, principalCapabilities.connectAgents)
     ) {
       return;

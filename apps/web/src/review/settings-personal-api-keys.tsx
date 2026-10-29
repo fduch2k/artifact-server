@@ -39,6 +39,7 @@ const personalCapabilities: readonly {
   { description: "Restore, tag, change access of, or delete your own artifacts.", label: "Manage your artifacts", value: "artifact:manage:own" },
   { description: "Open account-required artifact content.", label: "Issue content sessions", value: "content-session:issue" },
   { description: "Read, reply to, and resolve review comments.", label: "Manage comments", value: "comment:write" },
+  { description: "Register your coding agent and claim the annotations sent to it.", label: "Connect your agent", value: "agent:connect" },
 ];
 
 /** Keys that act as the signed-in member, and self-service issuance when enabled. */

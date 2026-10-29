@@ -35,8 +35,8 @@ test.describe("Personal API keys in settings", () => {
       await fixture.page.getByRole("button", {name: "Issue personal key"}).click();
       const dialog = fixture.page.getByRole("dialog", {name: "Issue personal key"});
       await expect(dialog).toContainText("expires within 45 days");
-      // Every owner-scoped capability starts selected; nothing reaches others' work.
-      await expect(dialog.getByRole("checkbox")).toHaveCount(6);
+      // Every capability of the ceiling starts selected; nothing reaches others' work.
+      await expect(dialog.getByRole("checkbox")).toHaveCount(7);
       await expect(dialog.getByText("Manage artifacts", {exact: true})).toHaveCount(0);
       await expect(dialog.getByRole("button", {name: "Issue personal key"})).toBeDisabled();
       await dialog.getByLabel("Name").fill("Laptop agent");

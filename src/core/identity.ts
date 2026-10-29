@@ -44,9 +44,11 @@ export const ownerScopedCapabilities: readonly PrincipalCapability[] = [
 
 /**
  * The most a member may grant a personal API key: everything a person does
- * with their own artifacts, nothing that reaches another member's.
+ * with their own artifacts and their own agent, nothing that reaches another
+ * member's.
  */
 export const personalApiKeyCapabilities: readonly PrincipalCapability[] = [
+  principalCapabilities.connectAgents,
   principalCapabilities.createArtifact,
   principalCapabilities.issueContentSession,
   principalCapabilities.manageOwnArtifact,
