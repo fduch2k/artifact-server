@@ -72,12 +72,13 @@ By default only administrators issue API keys. Set
 list, and revoke keys that act as themselves under **Settings → Personal API
 keys**. The switch accepts exactly `true` or `false` and defaults to `false`.
 
-A personal key holds at most `artifact:create`, `artifact:read`,
-`artifact:publish:own`, `artifact:manage:own`, `comment:write`, and
-`content-session:issue`. The two `:own` capabilities change only artifacts the
-key's member owns, so a person's agent cannot overwrite or delete a colleague's
-work. Administrators can give the same capabilities to keys they bind to a
-member.
+A personal key holds at most `agent:connect`, `artifact:create`,
+`artifact:read`, `artifact:publish:own`, `artifact:manage:own`,
+`comment:write`, and `content-session:issue`. The two `:own` capabilities
+change only artifacts the key's member owns, so a person's agent cannot
+overwrite or delete a colleague's work. With `agent:connect` the key registers
+the member's own agent and claims the threads sent to it. Administrators can
+give the same capabilities to keys they bind to a member.
 
 `ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS` sets the longest lifetime a member may
 choose, in whole days from 1 to 99999, and defaults to 30. It bounds how long the

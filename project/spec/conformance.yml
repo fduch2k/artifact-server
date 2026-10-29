@@ -1799,6 +1799,20 @@ requirements:
     depends_on: [AUTH-008, AUTH-030]
     evidence: []
 
+  - id: AUTH-036
+    kind: security
+    behavior: A key bound to a member and holding agent:connect, including a personal key, registers, claims, reports on, beacons, and disconnects agents that belong to that member; keys without the capability, other members' keys, and browser sessions cannot.
+    owner: authorization
+    source: {file: decisions/0033-member-keys-connect-agents.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-036-B, description: "A member's personal key registers an agent, claims the bundle the member sent it from the browser for their own restricted artifact, beacons, publishes a new version of that artifact, and reports delivered; another of the member's keys reaches the same agent; an administrator-issued key bound to another member connects that member's own agent."}
+      failure: {id: AUTH-036-F, description: "The member's key without agent:connect cannot register, claim, or beacon; another member's key cannot claim from, beacon, or disconnect the agent, and its registration under the same connection key is a separate agent; the member's browser session cannot register; and once the member is deactivated the key cannot claim."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-036-B and AUTH-036-F run against the local SQLite server, and the authorization policy test refuses a session that lists the capability; the rule lives in the backend-independent application layer. No deployment-specific evidence is recorded.
+    depends_on: [DSP-002, AUTH-034]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.
@@ -2817,7 +2831,7 @@ requirements:
 
   - id: DSP-002
     kind: security
-    behavior: Registering, claiming, and reporting on a dispatch require a service principal holding the agent-connect capability, and only the principal holding the claim may report on it.
+    behavior: Registering, claiming, and reporting on a dispatch require an API key holding the agent-connect capability, a service key or a key bound to a member (AUTH-036), and only the principal holding the claim may report on it.
     owner: agent-dispatch
     source: {file: agent-dispatch-spec.md, anchor: conformance-and-testing}
     acceptance:

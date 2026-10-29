@@ -138,6 +138,27 @@ describe("authorization policy", () => {
     );
   });
 
+  test("AUTH-036: any key holding agent:connect connects agents, a person's session never does", async () => {
+    expect.hasAssertions();
+    const connect = [principalCapabilities.connectAgents];
+    await expectAllowed((authorization) =>
+      authorization.requireAgentConnection(servicePrincipal("bridge", connect))
+    );
+    await expectAllowed((authorization) =>
+      authorization.requireAgentConnection(memberKeyPrincipal("member-owner", connect))
+    );
+    await expectDenied((authorization) =>
+      authorization.requireAgentConnection(memberKeyPrincipal("member-owner", []))
+    );
+    // Even a session that somehow lists the capability is a person, not an agent.
+    await expectDenied((authorization) =>
+      authorization.requireAgentConnection({
+        ...humanPrincipal("member-owner", membershipRoles.member),
+        capabilities: connect,
+      })
+    );
+  });
+
   test("foundation: another installation or an unscoped service cannot acquire authority", async () => {
     expect.hasAssertions();
     const artifact = artifactFixture();

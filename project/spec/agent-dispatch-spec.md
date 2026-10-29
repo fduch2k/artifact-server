@@ -145,7 +145,7 @@ One new capability: **`agent:connect`** — added to the closed capability sets 
 
 | Operation | Rule |
 | --- | --- |
-| Register, claim, report delivered/failed, disconnect | Service principal with `agent:connect` (or the local token). Direct humans are not agents. |
+| Register, claim, report delivered/failed, disconnect | An API key with `agent:connect`: a service key, a key bound to a member, whose agents then belong to that member ([ADR 0033](decisions/0033-member-keys-connect-agents.md)), or the local token. Direct human sessions are not agents. |
 | Send a dispatch, cancel a dispatch | Direct human member, or a service principal with `artifact:manage:any`. No new send capability in v1. |
 | List agents, list/read dispatches | Same authority as reading artifacts (`requireArtifactRead`): members and read-capable keys. Agents are not secrets; the picker needs them. |
 | Everything | Installation must match; project must resolve; cross-project ids fail as not-found without disclosure; archived projects reject new dispatches and allow reads. |

@@ -24,6 +24,7 @@ const administratorEmail = "administrator@example.test";
 const clientSecret = "personal-api-key-test-client-secret";
 const dayMilliseconds = 24 * 60 * 60 * 1_000;
 const personalCapabilities = [
+  "agent:connect",
   "artifact:create",
   "artifact:manage:own",
   "artifact:publish:own",
@@ -185,7 +186,6 @@ describe("personal API keys and owner-scoped capabilities", () => {
       ["artifact:read", "artifact:manage:any"],
       ["artifact:publish:any"],
       ["project:manage"],
-      ["agent:connect"],
     ].map(async (capabilities) => {
       const refused = await issuePersonal(ada, {
         capabilities,
@@ -194,7 +194,7 @@ describe("personal API keys and owner-scoped capabilities", () => {
       });
       return [refused.status, errorSchema.parse(await refused.json()).error.code];
     }));
-    expect(tooWide).toEqual(Array.from({length: 4}, () => [403, "AUTHORIZATION_DENIED"]));
+    expect(tooWide).toEqual(Array.from({length: 3}, () => [403, "AUTHORIZATION_DENIED"]));
     const wrongLifetime = await Promise.all([daysFromNow(31), daysFromNow(-1)].map(
       (expiresAt) => issuePersonal(ada, {
         capabilities: ["artifact:read"],

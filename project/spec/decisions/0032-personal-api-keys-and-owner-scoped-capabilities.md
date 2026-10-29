@@ -86,11 +86,12 @@ everything.
 ### The ceiling is fixed; the lifetime is the operator's
 
 The ceiling is the set of capabilities a person uses on their own work. It
-leaves out `agent:connect`, which is reserved for service principals, and
-`project:manage`, which stays with administrators. The longest lifetime is a
-deployment setting rather than a constant, because installations differ in how
-quickly they offboard people; the default of 30 days bounds how long a key of
-someone who left but was not deactivated keeps working.
+leaves out `project:manage`, which stays with administrators. It first left
+out `agent:connect` as well; [0033](0033-member-keys-connect-agents.md) adds
+it. The longest lifetime is a deployment setting rather than a constant,
+because installations differ in how quickly they offboard people; the default
+of 30 days bounds how long a key of someone who left but was not deactivated
+keeps working.
 
 ### No new storage
 
@@ -107,9 +108,8 @@ already stored as a list, so no backend needs a migration.
 
 ## Not part of this decision
 
-- A personal key that connects an agent to the dispatch mailbox. Agents are
-  service principals keyed by principal id; giving a member's own keys that
-  role needs its own decision.
+- A personal key that connects an agent to the dispatch mailbox, decided
+  later in [0033](0033-member-keys-connect-agents.md).
 - Rotating a personal key. A member issues a new key and revokes the old one.
 - A limit on how many personal keys a member holds.
 - Helm values for the two settings; compact Compose, external-storage Compose,
