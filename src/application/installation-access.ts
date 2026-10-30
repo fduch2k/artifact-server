@@ -32,6 +32,7 @@ import {
   type MemberDirectoryEntry,
   memberStatuses,
   type PersonalApiKeyPolicy,
+  type SlidingSessionPolicy,
   type StoredManagedApiKey,
 } from "../core/installation-identity.js";
 import {
@@ -50,6 +51,8 @@ import {
 
 const allCapabilities = Object.values(principalCapabilities);
 const millisecondsPerDay = 24 * 60 * 60 * 1_000;
+// A sliding session is rewritten at most once an hour, not on every request.
+const sessionRenewalStepMilliseconds = 60 * 60 * 1_000;
 const localBrowserLoginProvider = "artifact-server-local";
 
 export interface InstallationIdentityRepository {
@@ -145,6 +148,12 @@ export interface InstallationIdentityRepository {
   readonly listMembers: (
     installationId: string,
   ) => Effect.Effect<readonly InstallationMember[], IdentityRepositoryFailure>;
+  readonly renewApplicationSession: (
+    installationId: string,
+    sessionId: string,
+    expiresAt: string,
+    requestTime: string,
+  ) => Effect.Effect<boolean, IdentityRepositoryFailure>;
   readonly revokeApiKey: (
     installationId: string,
     keyId: string,
@@ -200,7 +209,10 @@ export interface InstallationAccessDependencies {
   readonly protectBootstrapAdministrator: boolean;
   readonly repository: InstallationIdentityRepository;
   readonly secrets: IdentitySecretProvider;
+  /** Fixed lifetime of a browser session; ignored when a sliding policy is set. */
   readonly sessionLifetimeMilliseconds: number;
+  /** Use keeps a browser session alive for this idle window; absent keeps the fixed lifetime. */
+  readonly slidingSessionPolicy?: SlidingSessionPolicy;
 }
 
 export interface AdmitMemberCommand {
@@ -391,6 +403,9 @@ function makeInstallationAccessService(
     : new AuthenticationCache<Principal>(cachePolicy);
   const cacheKey = (digest: string): string =>
     `${dependencies.installationId}:${digest}`;
+  const sessionLifetimeMilliseconds = dependencies.slidingSessionPolicy === undefined
+    ? dependencies.sessionLifetimeMilliseconds
+    : dependencies.slidingSessionPolicy.idleLifetimeDays * millisecondsPerDay;
 
   const issueSession = Effect.fn(
     "InstallationAccessService.issueSession",
@@ -402,7 +417,7 @@ function makeInstallationAccessService(
       createdAt: now.toISOString(),
       csrfDigest: dependencies.secrets.digest(csrfToken),
       expiresAt: new Date(
-        now.getTime() + dependencies.sessionLifetimeMilliseconds,
+        now.getTime() + sessionLifetimeMilliseconds,
       ).toISOString(),
       id: dependencies.ids.sessionId(),
       installationId: dependencies.installationId,
@@ -605,6 +620,28 @@ function makeInstallationAccessService(
     return member === null ? null : humanPrincipal(member);
   });
 
+  /** Push a sliding session's expiry one idle window past this use; null when nothing moved. */
+  const renewSession = Effect.fn(
+    "InstallationAccessService.renewSession",
+  )(function*(session: ApplicationSession, now: Date) {
+    if (dependencies.slidingSessionPolicy === undefined) return null;
+    const renewedExpiry = now.getTime() + sessionLifetimeMilliseconds;
+    if (
+      renewedExpiry - new Date(session.expiresAt).getTime()
+        < sessionRenewalStepMilliseconds
+    ) {
+      return null;
+    }
+    const expiresAt = new Date(renewedExpiry).toISOString();
+    const renewed = yield* dependencies.repository.renewApplicationSession(
+      dependencies.installationId,
+      session.id,
+      expiresAt,
+      now.toISOString(),
+    );
+    return renewed ? expiresAt : null;
+  });
+
   const authenticateSession = Effect.fn(
     "InstallationAccessService.authenticateSession",
   )(function*(credential: Redacted.Redacted) {
@@ -622,16 +659,20 @@ function makeInstallationAccessService(
         message: "A valid application session is required.",
       }));
     }
+    const renewedExpiresAt = yield* renewSession(session, now);
+    const expiresAt = renewedExpiresAt ?? session.expiresAt;
     const authenticated: AuthenticatedApplicationSession = {
       csrfDigest: session.csrfDigest,
-      expiresAt: session.expiresAt,
+      expiresAt,
       principal: humanPrincipal(session.member),
+      renewed: renewedExpiresAt !== null,
     };
+    // A cached hit never renews again, so it must not ask the browser to.
     sessionCache?.set(
       cacheKey(tokenDigest),
-      authenticated,
+      {...authenticated, renewed: false},
       now.getTime(),
-      new Date(session.expiresAt).getTime(),
+      new Date(expiresAt).getTime(),
     );
     return authenticated;
   });

@@ -17,7 +17,10 @@ import {
   runApplicationEffect,
 } from "../application/application-runtime.js";
 import { StagedUploadService } from "../application/staged-upload.js";
-import { AuthenticationService } from "../application/authentication.js";
+import {
+  type AuthenticatedApplicationSession,
+  AuthenticationService,
+} from "../application/authentication.js";
 import {
   digestIdentitySecret,
   identitySecretsEqual,
@@ -861,7 +864,15 @@ export function createHttpApp(
     if (isUnsafeMethod(context.req.method)) {
       requireBrowserMutationSecurity(context, dependencies);
     }
-    return next();
+    await next();
+    if (authenticated.renewed) {
+      followRenewedApplicationSession(
+        context,
+        dependencies,
+        parsedSession.data,
+        authenticated,
+      );
+    }
   });
 
   app.all("/mcp", boundedMcpBody, (context) =>
@@ -2663,21 +2674,52 @@ function setApplicationSessionCookies(
   issued: IssuedApplicationSession,
 ): void {
   const cookieNames = applicationCookieNames(dependencies);
-  const secure = usesSecureApplicationCookies(dependencies);
   const expires = new Date(issued.session.expiresAt);
-  setCookie(context, cookieNames.session, issued.token, {
+  setApplicationCookie(context, dependencies, cookieNames.session, issued.token, expires, true);
+  setApplicationCookie(context, dependencies, cookieNames.csrf, issued.csrfToken, expires, false);
+}
+
+/** Move the browser cookies to a renewed sliding session's new expiry. */
+function followRenewedApplicationSession(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+  sessionToken: string,
+  authenticated: AuthenticatedApplicationSession,
+): void {
+  const cookieNames = applicationCookieNames(dependencies);
+  // A route that wrote the session cookie itself, such as logout, has the last word.
+  if (
+    context.res.headers.getSetCookie()
+      .some((cookie) => cookie.startsWith(`${cookieNames.session}=`))
+  ) {
+    return;
+  }
+  const expires = new Date(authenticated.expiresAt);
+  setApplicationCookie(context, dependencies, cookieNames.session, sessionToken, expires, true);
+  const csrfToken = csrfTokenSchema.safeParse(getCookie(context, cookieNames.csrf));
+  if (
+    csrfToken.success
+    && digestIdentitySecret(csrfToken.data) === authenticated.csrfDigest
+  ) {
+    setApplicationCookie(context, dependencies, cookieNames.csrf, csrfToken.data, expires, false);
+  }
+  context.header("Cache-Control", "private, no-store");
+}
+
+function setApplicationCookie(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+  name: string,
+  value: string,
+  expires: Date,
+  httpOnly: boolean,
+): void {
+  setCookie(context, name, value, {
     expires,
-    httpOnly: true,
+    httpOnly,
     path: "/",
     sameSite: "Lax",
-    secure,
-  });
-  setCookie(context, cookieNames.csrf, issued.csrfToken, {
-    expires,
-    httpOnly: false,
-    path: "/",
-    sameSite: "Lax",
-    secure,
+    secure: usesSecureApplicationCookies(dependencies),
   });
 }
 

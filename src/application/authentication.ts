@@ -16,6 +16,8 @@ export interface AuthenticatedApplicationSession {
   readonly csrfDigest: string;
   readonly expiresAt: string;
   readonly principal: Principal;
+  /** This check moved a sliding session's expiry, so the browser cookies must follow. */
+  readonly renewed: boolean;
 }
 
 /** Expected failures while converting a credential into a principal. */

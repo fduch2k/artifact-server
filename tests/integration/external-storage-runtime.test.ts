@@ -972,6 +972,74 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     }
   });
 
+  test("AUTH-037: Postgres renews only a live session and never moves its expiry earlier", async () => {
+    const database = await PostgresDatabase.open({
+      maxConnections: 2,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    const scopedInstallation = `sliding-session-${randomUUID()}`;
+    try {
+      await PostgresArtifactRepository.open(database, scopedInstallation);
+      const repository = new PostgresIdentityRepository(
+        database,
+        scopedInstallation,
+      );
+      await repository.admitMember({
+        createdAt: "2026-10-30T00:00:00.000Z",
+        displayName: "Member",
+        email: "member@example.test",
+        id: "member-one",
+        installationId: scopedInstallation,
+        role: "member",
+      });
+      await Promise.all(["session-live", "session-revoked", "session-expired"].map(
+        (id) => repository.createApplicationSession({
+          createdAt: "2026-10-30T00:00:00.000Z",
+          csrfDigest: `${id}-csrf`,
+          expiresAt: "2026-11-06T00:00:00.000Z",
+          id,
+          installationId: scopedInstallation,
+          memberId: "member-one",
+          tokenDigest: `${id}-token`,
+        }),
+      ));
+      await repository.revokeApplicationSession(
+        scopedInstallation,
+        "session-revoked-token",
+        "2026-10-30T01:00:00.000Z",
+      );
+      const renew = (id: string, expiresAt: string, requestTime: string) =>
+        repository.renewApplicationSession(scopedInstallation, id, expiresAt, requestTime);
+
+      expect(await renew("session-live", "2026-11-08T00:00:00.000Z", "2026-11-01T00:00:00.000Z"))
+        .toBe(true);
+      expect(await renew("session-live", "2026-11-07T00:00:00.000Z", "2026-11-01T00:00:00.000Z"))
+        .toBe(false);
+      expect((await repository.findApplicationSession(
+        scopedInstallation,
+        "session-live-token",
+        "2026-11-01T00:00:00.000Z",
+      ))?.expiresAt).toBe("2026-11-08T00:00:00.000Z");
+      expect(await renew("session-revoked", "2026-11-08T00:00:00.000Z", "2026-11-01T00:00:00.000Z"))
+        .toBe(false);
+      expect(await renew("session-expired", "2026-11-14T00:00:00.000Z", "2026-11-07T00:00:00.000Z"))
+        .toBe(false);
+      expect((await repository.findApplicationSession(
+        scopedInstallation,
+        "session-expired-token",
+        "2026-11-05T00:00:00.000Z",
+      ))?.expiresAt).toBe("2026-11-06T00:00:00.000Z");
+      await expect(repository.renewApplicationSession(
+        "foreign-identity-installation",
+        "session-live",
+        "2026-11-09T00:00:00.000Z",
+        "2026-11-01T00:00:00.000Z",
+      )).rejects.toMatchObject({_tag: "IdentityNotFound"});
+    } finally {
+      await database.close();
+    }
+  });
+
   test("external-storage foundation: concurrent replicas cannot deactivate the last two administrators", async () => {
     const database = await PostgresDatabase.open({
       maxConnections: 2,

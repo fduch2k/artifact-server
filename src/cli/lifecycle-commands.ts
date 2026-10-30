@@ -17,6 +17,8 @@ import {
 } from "../identity/oidc-hosted-authentication.js";
 import {parsePersonalApiKeyPolicy} from
   "../identity/personal-api-key-policy.js";
+import {parseSlidingSessionPolicy} from
+  "../identity/sliding-session-policy.js";
 import {createOidcIdentityProvider} from
   "../identity/oidc-identity-provider.js";
 import {createWorkOsHostedAuthentication} from
@@ -358,6 +360,10 @@ function configureExternalStorageStart(
       if (personalApiKeyPolicy !== null) {
         serverConfig = {...serverConfig, personalApiKeyPolicy};
       }
+      const slidingSessionPolicy = slidingSessionPolicyFrom(process.env);
+      if (slidingSessionPolicy !== null) {
+        serverConfig = {...serverConfig, slidingSessionPolicy};
+      }
       const server = await startExternalStorageServer(serverConfig);
       const displayHostname = options.host === "0.0.0.0"
         ? "localhost"
@@ -434,7 +440,17 @@ async function startCompactServer(
   if (personalApiKeyPolicy !== null) {
     serverConfig = {...serverConfig, personalApiKeyPolicy};
   }
+  const slidingSessionPolicy = slidingSessionPolicyFrom(process.env);
+  if (slidingSessionPolicy !== null) {
+    serverConfig = {...serverConfig, slidingSessionPolicy};
+  }
   return startLocalServer(serverConfig);
+}
+
+function slidingSessionPolicyFrom(
+  environment: NodeJS.ProcessEnv,
+): ReturnType<typeof parseSlidingSessionPolicy> {
+  return parseSlidingSessionPolicy(environment["ARTIFACT_SERVER_SESSION_IDLE_DAYS"]);
 }
 
 function personalApiKeyPolicyFrom(

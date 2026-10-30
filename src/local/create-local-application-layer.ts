@@ -129,6 +129,7 @@ import type {IdentityRepository} from "../core/identity-ports.js";
 import type {
   ExternalIdentityAdmissionPolicy,
   PersonalApiKeyPolicy,
+  SlidingSessionPolicy,
 } from "../core/installation-identity.js";
 import type { ManifestEntry } from "../core/model.js";
 import {randomBase64Url} from "../core/random.js";
@@ -152,6 +153,7 @@ export interface ApplicationAdapters {
   readonly bootstrapAdministratorEmail: string;
   readonly externalIdentityAdmissionPolicy?: ExternalIdentityAdmissionPolicy;
   readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
+  readonly slidingSessionPolicy?: SlidingSessionPolicy;
   readonly clock: Clock;
   readonly externalApiBearerVerifier: BearerCredentialVerifier | null;
   readonly externalMcpBearerVerifier: BearerCredentialVerifier | null;
@@ -895,6 +897,16 @@ export function createApplicationLayer(
         "revokeApiKey",
         () => identityRepository.revokeApiKey(installationId, keyId, revokedAt),
       ),
+      renewApplicationSession: (installationId, sessionId, expiresAt, requestTime) =>
+        identityEffect(
+          "renewApplicationSession",
+          () => identityRepository.renewApplicationSession(
+            installationId,
+            sessionId,
+            expiresAt,
+            requestTime,
+          ),
+        ),
       revokeApplicationSession: (installationId, tokenDigest, revokedAt) =>
         identityEffect(
           "revokeApplicationSession",
@@ -926,6 +938,9 @@ export function createApplicationLayer(
   }
   if (adapters.personalApiKeyPolicy !== undefined) {
     Object.assign(identityDependencies, {personalApiKeyPolicy: adapters.personalApiKeyPolicy});
+  }
+  if (adapters.slidingSessionPolicy !== undefined) {
+    Object.assign(identityDependencies, {slidingSessionPolicy: adapters.slidingSessionPolicy});
   }
   const identityLayer = InstallationAccessService.layer(identityDependencies);
   const authenticationLayer = Layer.effect(

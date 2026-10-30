@@ -1813,6 +1813,20 @@ requirements:
     depends_on: [DSP-002, AUTH-034]
     evidence: []
 
+  - id: AUTH-037
+    kind: security
+    behavior: With a configured idle window, use renews a live browser session one idle window past the use, at most hourly and only forward, and the browser cookies follow; an idle, revoked, or deactivated member's session is not renewed, and without the setting sessions keep their fixed lifetime.
+    owner: authorization
+    source: {file: decisions/0034-sliding-browser-sessions.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-037-B, description: "With a seven-day idle window, a session used inside the hourly step is left alone, a later use moves its stored expiry and both re-issued cookies seven days past that use on a non-cacheable response, the same cookie values then work past the original expiry and still authorize a mutation, and a renewing logout keeps its cleared cookies."}
+      failure: {id: AUTH-037-F, description: "A session idle for a full window, one revoked in shared storage, and one whose member is deactivated are refused without a stored renewal; storage refuses to renew a revoked, expired, or foreign-installation session or to move an expiry earlier; without the setting a used session still ends after twelve hours; and an idle window outside whole days from 1 to 365 fails startup."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-037-B and AUTH-037-F run against the local SQLite server with a controlled clock and the SQLite repository; the Postgres repository runs the same storage contract in the external-storage runtime suite; the Cloudflare Worker renews an aged D1 session end to end and refuses a malformed setting; compact serving refuses a malformed setting. Helm does not render the setting, and no deployment-specific evidence is recorded.
+    depends_on: [AUTH-010, AUTH-022, AUTH-027]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.

@@ -481,6 +481,15 @@ export function createD1IdentityRepository(
       return withoutSecretDigest(key);
     },
 
+    renewApplicationSession: async (installationId, sessionId, expiresAt, requestTime) => {
+      const result = await database.prepare(`
+        UPDATE application_sessions SET expires_at = ?
+        WHERE installation_id = ? AND id = ? AND revoked_at IS NULL
+          AND expires_at > ? AND expires_at < ?
+      `).bind(expiresAt, installationId, sessionId, requestTime, expiresAt).run();
+      return result.meta.changes === 1;
+    },
+
     revokeApplicationSession: async (installationId, tokenDigest, revokedAt) => {
       await database.prepare(`
         UPDATE application_sessions SET revoked_at = COALESCE(revoked_at, ?)

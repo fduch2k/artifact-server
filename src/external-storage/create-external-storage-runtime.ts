@@ -11,6 +11,7 @@ import type {BrowserAccess} from "../core/browser-access.js";
 import type {
   ExternalIdentityAdmissionPolicy,
   PersonalApiKeyPolicy,
+  SlidingSessionPolicy,
 } from "../core/installation-identity.js";
 import {SystemClock, SystemIdGenerator} from "../core/system.js";
 import {createHttpApp} from "../http/create-http-app.js";
@@ -77,6 +78,8 @@ export interface ExternalStorageRuntimeConfig {
   readonly externalIdentityAdmissionPolicy?: ExternalIdentityAdmissionPolicy;
   /** Members may issue their own owner-scoped API keys; absent leaves it to administrators. */
   readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
+  /** Use keeps a browser session alive for this idle window; absent keeps fixed sessions. */
+  readonly slidingSessionPolicy?: SlidingSessionPolicy;
   readonly browserAccess: Extract<BrowserAccess, {readonly mode: "private_team"}>;
   readonly clock?: Clock;
   readonly completedRequestLogSampleRate?: number;
@@ -190,6 +193,9 @@ export async function createExternalStorageRuntime(
     }
     if (config.personalApiKeyPolicy !== undefined) {
       Object.assign(applicationAdapters, {personalApiKeyPolicy: config.personalApiKeyPolicy});
+    }
+    if (config.slidingSessionPolicy !== undefined) {
+      Object.assign(applicationAdapters, {slidingSessionPolicy: config.slidingSessionPolicy});
     }
     if (gitHistoryProvider !== null) {
       Object.assign(applicationAdapters, {gitHistoryProvider});

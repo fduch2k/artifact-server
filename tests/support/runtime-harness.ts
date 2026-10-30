@@ -29,6 +29,7 @@ import type {Clock} from "../../src/core/ports.js";
 import type {
   ExternalIdentityAdmissionPolicy,
   PersonalApiKeyPolicy,
+  SlidingSessionPolicy,
 } from "../../src/core/installation-identity.js";
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
@@ -109,6 +110,7 @@ export async function startTestServer(
     readonly observability?: boolean;
     readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
     readonly port?: number;
+    readonly slidingSessionPolicy?: SlidingSessionPolicy;
     readonly webAssetsRoot?: string;
   } = {},
 ): Promise<RunningTestServer> {
@@ -195,6 +197,9 @@ export async function startTestServer(
   }
   if (options.personalApiKeyPolicy !== undefined) {
     config = {...config, personalApiKeyPolicy: options.personalApiKeyPolicy};
+  }
+  if (options.slidingSessionPolicy !== undefined) {
+    config = {...config, slidingSessionPolicy: options.slidingSessionPolicy};
   }
   if (options.webAssetsRoot !== undefined) {
     config = {...config, webAssetsRoot: options.webAssetsRoot};

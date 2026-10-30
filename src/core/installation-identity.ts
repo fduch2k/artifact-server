@@ -58,6 +58,12 @@ export interface PersonalApiKeyPolicy {
   readonly maxLifetimeDays: number;
 }
 
+/** Optional sliding expiry of browser sessions: use keeps a session alive. */
+export interface SlidingSessionPolicy {
+  /** A session unused for this many whole days expires; each use pushes expiry this far ahead. */
+  readonly idleLifetimeDays: number;
+}
+
 /** One server-side browser session after its opaque credential is verified. */
 export interface ApplicationSession {
   readonly createdAt: string;
