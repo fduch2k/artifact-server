@@ -467,6 +467,21 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     };
   }
 
+  async renewApplicationSession(
+    installationId: string,
+    sessionId: string,
+    expiresAt: string,
+    requestTime: string,
+  ): Promise<boolean> {
+    const result = this.#database.prepare(`
+      UPDATE application_sessions
+      SET expires_at = ?
+      WHERE installation_id = ? AND id = ? AND revoked_at IS NULL AND
+        expires_at > ? AND expires_at < ?
+    `).run(expiresAt, installationId, sessionId, requestTime, expiresAt);
+    return result.changes === 1;
+  }
+
   async revokeApplicationSession(
     installationId: string,
     tokenDigest: string,

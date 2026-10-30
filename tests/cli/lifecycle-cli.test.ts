@@ -659,6 +659,33 @@ describe("Artifact Server lifecycle CLI", () => {
       await rm(parent, {force: true, recursive: true});
     }
   }, 30_000);
+
+  test("AUTH-037: compact serving refuses a malformed session idle window", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "artifact-server-session-idle-"));
+    const dataDirectory = path.join(parent, "data");
+    try {
+      const initialized = await runCli([
+        "init",
+        "--admin-email",
+        "admin@example.test",
+        "--data",
+        dataDirectory,
+      ]);
+      expect(initialized.exitCode).toBe(0);
+      const malformed = await runCli(
+        ["start-compact", "--data", dataDirectory, "--port", "0"],
+        compactEnvironment({
+          ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-test-client",
+          ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
+          ARTIFACT_SERVER_SESSION_IDLE_DAYS: "366",
+        }),
+      );
+      expect(malformed.exitCode).not.toBe(0);
+      expect(malformed.output).toContain("ARTIFACT_SERVER_SESSION_IDLE_DAYS");
+    } finally {
+      await rm(parent, {force: true, recursive: true});
+    }
+  }, 30_000);
 });
 
 function compactEnvironment(

@@ -412,6 +412,25 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     }));
   }
 
+  async renewApplicationSession(
+    installationId: string,
+    sessionId: string,
+    expiresAt: string,
+    requestTime: string,
+  ): Promise<boolean> {
+    this.#assertInstallationScope(installationId);
+    const rows = await this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      return yield* sql`UPDATE application_sessions
+        SET expires_at = ${expiresAt}
+        WHERE installation_id = ${installationId} AND id = ${sessionId}
+          AND revoked_at IS NULL AND expires_at > ${requestTime}
+          AND expires_at < ${expiresAt}
+        RETURNING id`;
+    }));
+    return rows.length === 1;
+  }
+
   async revokeApplicationSession(
     installationId: string,
     tokenDigest: string,

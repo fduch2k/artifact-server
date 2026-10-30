@@ -349,7 +349,9 @@ revealing credentials.
 
 Account-required artifact links use normal Artifact Server browser sign-in.
 Public artifact links require no sign-in. MCP credentials never become browser
-cookies.
+cookies. A browser session lasts 12 hours from sign-in unless the operator makes
+sessions sliding, so that use keeps them alive
+([ADR 0034](decisions/0034-sliding-browser-sessions.md)).
 
 `artifact_get` returns the exact full-screen Review URL for the current version.
 `artifact_open` returns that Review URL and the raw immutable content URL for the

@@ -1,7 +1,8 @@
 import {createServer, type Server} from "node:http";
-import {mkdtemp, rm} from "node:fs/promises";
+import {mkdtemp, readdir, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {DatabaseSync} from "node:sqlite";
 
 import {z} from "zod";
 import {exportJWK, generateKeyPair, SignJWT, type JWK} from "jose";
@@ -129,6 +130,67 @@ describe("Cloudflare Worker browser-login provider", () => {
       ARTIFACT_SERVER_OIDC_CLIENT_ID: clientId,
       ARTIFACT_SERVER_OIDC_ISSUER: issuerOrigin,
       ...settings,
+    });
+    try {
+      const ready = await worker.fetch(`${origin}/ready`);
+      expect(ready.status).toBe(503);
+    } finally {
+      await worker.stop();
+      await rm(directory, {force: true, recursive: true});
+    }
+  }, 120_000);
+
+  it("AUTH-037: the Worker slides a D1 browser session forward on use", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "artifact-server-sliding-sessions-"));
+    const settings = {
+      ARTIFACT_SERVER_OIDC_CLIENT_ID: clientId,
+      ARTIFACT_SERVER_OIDC_ISSUER: `${issuerOrigin}/`,
+      ARTIFACT_SERVER_SESSION_IDLE_DAYS: "3",
+    };
+    const idleWindow = 3 * 24 * 60 * 60 * 1_000;
+    let worker: Unstable_DevWorker | null = await startWorker(directory, settings);
+    try {
+      const signedInAt = Date.now();
+      const login = await completeWorkerLogin(worker, "administrator@example.test", "administrator");
+      expect(login.status).toBe(303);
+      const cookies = login.headers.getSetCookie();
+      expectNear(cookieExpires(cookies, "__Host-artifact_session"), signedInAt + idleWindow);
+      const cookie = cookies.map((entry) => entry.split(";")[0] ?? "").join("; ");
+
+      // Age the stored session as if its last renewal were days ago, then use it.
+      await worker.stop();
+      worker = null;
+      const agedExpiry = new Date(Date.now() + 30 * 60 * 1_000).toISOString();
+      await withD1Database(directory, (database) => {
+        database.prepare("UPDATE application_sessions SET expires_at = ?").run(agedExpiry);
+      });
+      worker = await startWorker(directory, settings);
+      const usedAt = Date.now();
+      const used = await worker.fetch(`${origin}/api/v1/session`, {headers: {Cookie: cookie}});
+      expect(used.status).toBe(200);
+      const renewed = used.headers.getSetCookie();
+      expectNear(cookieExpires(renewed, "__Host-artifact_session"), usedAt + idleWindow);
+      expectNear(cookieExpires(renewed, "__Host-artifact_csrf"), usedAt + idleWindow);
+      await worker.stop();
+      worker = null;
+      await withD1Database(directory, (database) => {
+        const stored = z.object({expiresAt: z.string()}).parse(database.prepare(
+          "SELECT expires_at AS expiresAt FROM application_sessions",
+        ).get()).expiresAt;
+        expectNear(Date.parse(stored), usedAt + idleWindow);
+      });
+    } finally {
+      await worker?.stop();
+      await rm(directory, {force: true, recursive: true});
+    }
+  }, 120_000);
+
+  it("AUTH-037: refuses a malformed session idle window", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "artifact-server-session-idle-policy-"));
+    const worker = await startWorker(directory, {
+      ARTIFACT_SERVER_OIDC_CLIENT_ID: clientId,
+      ARTIFACT_SERVER_OIDC_ISSUER: issuerOrigin,
+      ARTIFACT_SERVER_SESSION_IDLE_DAYS: "0",
     });
     try {
       const ready = await worker.fetch(`${origin}/ready`);
@@ -335,6 +397,43 @@ function startDiscoveryStub(publicJwk: JWK): Promise<Server> {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => resolve(server));
   });
+}
+
+function cookieExpires(cookies: readonly string[], name: string): number {
+  const cookie = cookies.find((value) => value.startsWith(`${name}=`));
+  const expires = cookie === undefined ? undefined : /;\s*Expires=([^;]+)/iu.exec(cookie)?.[1];
+  if (expires === undefined) throw new Error(`The response did not set ${name} with an expiry.`);
+  return Date.parse(expires);
+}
+
+/** Cookie expiry has one-second precision and the Worker reads its own clock. */
+function expectNear(actual: number, expected: number): void {
+  expect(Math.abs(actual - expected)).toBeLessThan(5_000);
+}
+
+/** Open the Worker's persisted D1 file while the Worker is stopped. */
+async function withD1Database(
+  persistenceDirectory: string,
+  use: (database: DatabaseSync) => void,
+): Promise<void> {
+  const files = (await readdir(persistenceDirectory, {recursive: true}))
+    .filter((file) => file.endsWith(".sqlite"))
+    .map((file) => join(persistenceDirectory, file));
+  for (const file of files) {
+    const database = new DatabaseSync(file);
+    try {
+      const sessions = database.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'application_sessions'",
+      ).get();
+      if (sessions !== undefined) {
+        use(database);
+        return;
+      }
+    } finally {
+      database.close();
+    }
+  }
+  throw new Error("The persisted D1 database was not found.");
 }
 
 function startWorker(

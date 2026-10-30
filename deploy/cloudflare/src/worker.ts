@@ -47,6 +47,8 @@ import {createWorkOsHostedAuthentication} from
   "../../../src/identity/workos-hosted-authentication.js";
 import {parsePersonalApiKeyPolicy} from
   "../../../src/identity/personal-api-key-policy.js";
+import {parseSlidingSessionPolicy} from
+  "../../../src/identity/sliding-session-policy.js";
 import {parseOidcAdmissionPolicy} from
   "../../../src/identity/oidc-admission-policy.js";
 
@@ -73,6 +75,7 @@ export interface WorkerEnvironment {
   readonly ARTIFACT_SERVER_QUALIFICATION_MODE?: "enabled";
   readonly ARTIFACT_SERVER_R2_BUCKET: R2Bucket;
   readonly ARTIFACT_SERVER_REQUEST_LOG_SAMPLE_RATE?: string | number;
+  readonly ARTIFACT_SERVER_SESSION_IDLE_DAYS?: string;
   readonly ARTIFACT_SERVER_WORKOS_API_KEY?: string;
   readonly ARTIFACT_SERVER_WORKOS_CLIENT_ID?: string;
   readonly ARTIFACT_SERVER_WORKOS_ISSUER?: string;
@@ -161,6 +164,9 @@ async function createCloudflareRuntime(
     environment.ARTIFACT_SERVER_PERSONAL_API_KEYS,
     environment.ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS,
   );
+  const slidingSessionPolicy = parseSlidingSessionPolicy(
+    environment.ARTIFACT_SERVER_SESSION_IDLE_DAYS,
+  );
   await migrateD1(
     environment.ARTIFACT_SERVER_D1_DATABASE,
     environment.ARTIFACT_SERVER_INSTALLATION_ID,
@@ -214,6 +220,9 @@ async function createCloudflareRuntime(
   }
   if (personalApiKeyPolicy !== null) {
     Object.assign(applicationAdapters, {personalApiKeyPolicy});
+  }
+  if (slidingSessionPolicy !== null) {
+    Object.assign(applicationAdapters, {slidingSessionPolicy});
   }
   if (gitHistory.provider !== null) {
     Object.assign(applicationAdapters, {gitHistoryProvider: gitHistory.provider});

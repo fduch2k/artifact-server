@@ -96,6 +96,16 @@ export interface IdentityRepository {
     keyId: string,
     revokedAt: string,
   ): Promise<ManagedApiKey>;
+  /**
+   * Move a live session's expiry later; false when it is revoked, already
+   * expired, or already expires at or after the requested time.
+   */
+  renewApplicationSession(
+    installationId: string,
+    sessionId: string,
+    expiresAt: string,
+    requestTime: string,
+  ): Promise<boolean>;
   revokeApplicationSession(
     installationId: string,
     tokenDigest: string,

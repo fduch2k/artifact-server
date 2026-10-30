@@ -88,6 +88,23 @@ session, never from another key. Invalid values fail startup. The settings apply
 to compact Compose, external-storage Compose, and the Cloudflare Worker; the Helm
 chart does not render them yet.
 
+### Keep browser sessions alive while people use them
+
+A browser session lasts 12 hours from sign-in by default, however much it is
+used. Set `ARTIFACT_SERVER_SESSION_IDLE_DAYS` to a whole number of days from 1 to
+365 to make sessions sliding instead: a session then expires only after that many
+days without use, and each use pushes the expiry that far ahead. The server
+rewrites the expiry at most once an hour per session and re-issues both session
+cookies with the new expiry on that response. Invalid values fail startup.
+
+A sliding session has no absolute end. Someone who keeps using it stays signed
+in until a session idles out, they sign out, or an administrator deactivates
+their member, which ends every session at once; leaving the identity provider
+alone does not end a session that is still in use. Sessions issued before the
+setting changes keep their stored expiry and start sliding on their next use.
+The setting applies to compact Compose, external-storage Compose, and the
+Cloudflare Worker; the Helm chart does not render it yet.
+
 ### Use a generic OIDC issuer for MCP
 
 The issuer configured for browser login also protects `/mcp`. Agents present an
