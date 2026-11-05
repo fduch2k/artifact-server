@@ -10,6 +10,39 @@ export type SettingsRoute =
   | {readonly kind: "publicLinks"}
   | {readonly kind: "notFound"};
 
+/**
+ * Where the server sends a browser that followed an artifact link before it
+ * had a session; once the session exists the application resumes the link.
+ */
+export const reviewContinuePath = "/review/continue";
+
+/**
+ * Return the application path a continue URL resumes. Anything that is not a
+ * plain path on this origin, or that would come back here, opens Review.
+ */
+export function continueDestination(search: string, origin: string): string {
+  const fallback = "/review";
+  const requested = new URLSearchParams(search).get("returnTo");
+  if (
+    requested === null || !requested.startsWith("/")
+    || requested.startsWith("//") || requested.includes("\\")
+  ) {
+    return fallback;
+  }
+  try {
+    const resolved = new URL(requested, origin);
+    if (
+      resolved.origin !== origin || resolved.pathname.startsWith("//")
+      || resolved.pathname === reviewContinuePath
+    ) {
+      return fallback;
+    }
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
 /** Return whether the current document path belongs to the settings mode. */
 export function isSettingsPath(pathname: string): boolean {
   return pathname === "/review/settings"

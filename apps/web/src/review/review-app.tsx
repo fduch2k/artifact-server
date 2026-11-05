@@ -70,7 +70,11 @@ import {
 } from "./review-comments.tsx";
 import { ReviewPreview } from "./review-preview.tsx";
 import {ReviewProjectPicker} from "./review-project-picker.tsx";
-import {isSettingsPath} from "./review-routes.ts";
+import {
+  continueDestination,
+  isSettingsPath,
+  reviewContinuePath,
+} from "./review-routes.ts";
 import {ReviewSettings} from "./review-settings.tsx";
 import {ReviewPanelEdge} from "./review-panel-edge.tsx";
 import {AgentLogos, ReviewShareControl} from "./review-share.tsx";
@@ -479,6 +483,10 @@ export function ReviewApp() {
     );
   }
   if (session === null) return null;
+
+  if (window.location.pathname === reviewContinuePath) {
+    return <ReviewContinue />;
+  }
 
   if (isSettingsPath(window.location.pathname)) {
     return (
@@ -2739,6 +2747,15 @@ function ReviewGate({
       </section>
     </main>
   );
+}
+
+function ReviewContinue() {
+  useEffect(() => {
+    window.location.replace(
+      continueDestination(window.location.search, window.location.origin),
+    );
+  }, []);
+  return <ReviewGate description="Returning to the link you opened." title="Opening artifact" />;
 }
 
 function readInitialTheme(): ReviewTheme {

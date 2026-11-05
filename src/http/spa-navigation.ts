@@ -3,6 +3,14 @@
  * HTML entry file.
  */
 export function permitsSpaEntryFallback(headers: Headers): boolean {
+  return isDocumentNavigation(headers);
+}
+
+/**
+ * Decide whether a request is a person's browser opening a page, as opposed
+ * to a script, an asset, or a program that reads the response itself.
+ */
+export function isDocumentNavigation(headers: Headers): boolean {
   if (!acceptsHtml(headers.get("accept"))) return false;
   const destination = headers.get("sec-fetch-dest");
   if (destination !== null && destination.toLowerCase() !== "document") {

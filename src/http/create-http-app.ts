@@ -61,6 +61,7 @@ import {
 } from "../application/compare-artifact.js";
 import {
   ContentAccessService,
+  type IssuedContentBootstrap,
   isPreviewLeaseToken,
 } from "../application/content-access.js";
 import {
@@ -131,7 +132,7 @@ import {
   decideByteRange,
   ifRangeAllowsPartialResponse,
 } from "./byte-range.js";
-import {permitsSpaEntryFallback} from "./spa-navigation.js";
+import {isDocumentNavigation, permitsSpaEntryFallback} from "./spa-navigation.js";
 import {
   maximumCommentPageSize,
   maximumDeclaredFiles,
@@ -224,6 +225,8 @@ const contentSessionTokenSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9_-]+$/u);
 const contentBootstrapQueryParameter = "__artifact_bootstrap";
+/** Application route that turns a signed-in browser into a version content session. */
+const browserVersionOpenPath = "/open";
 const contentSessionCookieName = "__Host-artifact_content";
 const loopbackContentSessionCookieName = "artifact_content";
 const linkArtifactSchema = z.object({
@@ -2565,19 +2568,77 @@ export function createHttpApp(
   });
 
   app.get("/artifacts/:artifactId", async (context) => {
-    const current = await runHttpApplicationEffect(
+    const artifactId = context.req.param("artifactId");
+    const resolved = await runHttpApplicationEffect(
       context,
       dependencies,
       ContentAccessService.use((contentAccess) =>
-        contentAccess.resolvePublicArtifact(context.req.param("artifactId"))
+        contentAccess.resolvePublicArtifact(artifactId).pipe(
+          Effect.map((current) => ({current, kind: "public" as const})),
+          Effect.catchTag("ContentSessionRequired", (failure) =>
+            Effect.succeed({failure, kind: "private" as const})),
+        )
       ),
     );
-    const versionUrl = versionBrowserUrl(
-      responseApplicationUrl(context, dependencies),
-      dependencies.contentDomain,
-      current.version.contentToken,
+    if (resolved.kind === "public") {
+      const versionUrl = versionBrowserUrl(
+        responseApplicationUrl(context, dependencies),
+        dependencies.contentDomain,
+        resolved.current.version.contentToken,
+      );
+      return context.redirect(versionUrl, 302);
+    }
+    // A private latest link opens for a signed-in member through a one-time
+    // content bootstrap, and sends a signed-out person's browser to sign in
+    // and back here. Programs keep the plain 401.
+    const principal = await browserSessionPrincipal(context, dependencies);
+    if (principal === null) {
+      if (!isDocumentNavigation(context.req.raw.headers)) throw resolved.failure;
+      return redirectToBrowserSignIn(
+        context,
+        dependencies,
+        `/artifacts/${encodeURIComponent(artifactId)}`,
+      );
+    }
+    const issued = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ContentAccessService.use((contentAccess) =>
+        contentAccess.issueBrowserContentBootstrap({
+          principal,
+          target: {artifactId, kind: "latest"},
+        })
+      ),
     );
-    return context.redirect(versionUrl, 302);
+    return redirectToContentBootstrap(context, dependencies, issued);
+  });
+
+  // An exact-version address that met a browser without a content session
+  // sends it here: the application origin knows who is signed in, issues that
+  // version's bootstrap, and returns the browser to the same file.
+  app.get(`${browserVersionOpenPath}/:contentToken`, async (context) => {
+    const contentToken = contentTokenSchema.parse(context.req.param("contentToken"));
+    const destinationPath = requestedContentPath(context);
+    const principal = await browserSessionPrincipal(context, dependencies);
+    if (principal === null) {
+      const requestUrl = new URL(context.req.url);
+      return redirectToBrowserSignIn(
+        context,
+        dependencies,
+        `${requestUrl.pathname}${requestUrl.search}`,
+      );
+    }
+    const issued = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ContentAccessService.use((contentAccess) =>
+        contentAccess.issueBrowserContentBootstrap({
+          principal,
+          target: {contentToken, kind: "version_origin"},
+        })
+      ),
+    );
+    return redirectToContentBootstrap(context, dependencies, issued, destinationPath);
   });
 
   app.notFound((context) =>
@@ -2666,6 +2727,82 @@ function apiBearerChallenge(
     dependencies.apiOAuthResource.resource,
   );
   return `Bearer resource_metadata="${metadata.toString()}" scope="artifactserver"`;
+}
+
+/**
+ * Read the browser's application session on a page route outside `/api`.
+ * A missing, expired, or revoked session is an ordinary signed-out visit, not
+ * a failure; a renewed sliding session sends its cookies back as `/api` does.
+ */
+async function browserSessionPrincipal(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+): Promise<Principal | null> {
+  const parsedSession = sessionTokenSchema.safeParse(
+    getCookie(context, applicationCookieNames(dependencies).session),
+  );
+  if (!parsedSession.success) return null;
+  const authenticated = await runHttpApplicationEffect(
+    context,
+    dependencies,
+    AuthenticationService.use((authentication) =>
+      authentication.authenticateApplicationSession(
+        Redacted.make(parsedSession.data, {label: "application-session"}),
+      ).pipe(
+        Effect.catchTag("AuthenticationRequired", () => Effect.succeed(null)),
+      )
+    ),
+  );
+  if (authenticated === null) return null;
+  if (authenticated.renewed) {
+    followRenewedApplicationSession(
+      context,
+      dependencies,
+      parsedSession.data,
+      authenticated,
+    );
+  }
+  return authenticated.principal;
+}
+
+/**
+ * Send a signed-out browser to this installation's sign-in and back to
+ * `returnTo`. A private team signs in through its provider; a local owner has
+ * no sign-in step, so the management application creates the session first.
+ */
+function redirectToBrowserSignIn(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+  returnTo: string,
+): Response {
+  const query = new URLSearchParams({returnTo}).toString();
+  context.header("Cache-Control", "private, no-store");
+  return context.redirect(
+    dependencies.browserAccess.mode === browserAccessModes.privateTeam
+      ? `/auth/login?${query}`
+      : `/review/continue?${query}`,
+    303,
+  );
+}
+
+function redirectToContentBootstrap(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+  issued: IssuedContentBootstrap,
+  destinationPath?: string,
+): Response {
+  context.header("Cache-Control", "private, no-store");
+  context.header("Referrer-Policy", "no-referrer");
+  return context.redirect(
+    contentBootstrapBrowserUrl(
+      responseApplicationUrl(context, dependencies),
+      dependencies.contentDomain,
+      issued.contentToken,
+      Redacted.value(issued.token),
+      destinationPath,
+    ),
+    303,
+  );
 }
 
 function setApplicationSessionCookies(
@@ -3601,6 +3738,8 @@ async function serveVersionContent(
   if (requestedPath === null) {
     return versionNotFoundResponse();
   }
+  const documentNavigation = method === "GET"
+    && isDocumentNavigation(context.req.raw.headers);
   const content = await runHttpApplicationEffect(
     context,
     dependencies,
@@ -3612,9 +3751,23 @@ async function serveVersionContent(
           : "none",
         path: requestedPath,
         sessionToken: contentSessionToken(cookieHeader),
-      })
+      }).pipe(
+        Effect.catchTag("ContentSessionRequired", (failure) =>
+          documentNavigation
+            ? Effect.succeed("session_required" as const)
+            : Effect.fail(failure)),
+      )
     ),
   );
+  if (content === "session_required") {
+    return versionSignInResponse(
+      context,
+      requestUrl,
+      contentToken,
+      requestedPath,
+      dependencies,
+    );
+  }
   if (content === null) {
     return versionNotFoundResponse();
   }
@@ -4010,6 +4163,88 @@ function assertBlobSize(actual: number, expected: number, digest: string): void 
       `Stored blob ${digest} is ${actual} bytes but its manifest records ${expected}.`,
     );
   }
+}
+
+/**
+ * Answer a person's browser that opened a private version without a content
+ * session. Arriving from anywhere else, it goes straight to the application
+ * origin, which knows whether this person is signed in. Arriving from this
+ * same version host means the session cookie did not stick after the
+ * bootstrap exchange, so it gets a sign-in page instead of another redirect:
+ * the exchange page reloads the version itself, and a browser that refuses
+ * the cookie would otherwise bounce between the two origins forever. A
+ * browser that does not send fetch metadata gets the page for the same reason.
+ */
+function versionSignInResponse(
+  context: Context<HttpEnvironment>,
+  requestUrl: URL,
+  contentToken: string,
+  manifestPath: string,
+  dependencies: HttpAppDependencies,
+): Response {
+  const openUrl = new URL(
+    `${browserVersionOpenPath}/${contentToken}`,
+    contentHostApplicationUrl(requestUrl, dependencies),
+  );
+  if (manifestPath !== "") openUrl.searchParams.set("path", manifestPath);
+  const headers = new Headers({
+    "Cache-Control": "private, no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow",
+  });
+  const fetchSite = context.req.header("sec-fetch-site");
+  if (fetchSite !== undefined && fetchSite !== "same-origin") {
+    headers.set("Location", openUrl.toString());
+    return new Response(null, {headers, status: 303});
+  }
+  headers.set(
+    "Content-Security-Policy",
+    "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'",
+  );
+  headers.set("Content-Type", "text/html; charset=utf-8");
+  return new Response(versionSignInHtml(openUrl.toString()), {
+    headers,
+    status: 401,
+  });
+}
+
+/** The application origin as seen from one of its version hosts. */
+function contentHostApplicationUrl(
+  requestUrl: URL,
+  dependencies: HttpAppDependencies,
+): URL {
+  if (dependencies.trustedApplicationOrigin !== null) {
+    return new URL(dependencies.trustedApplicationOrigin);
+  }
+  // A local installation serves `<token>.<content domain>` from the same
+  // loopback listener as the application on the content domain itself.
+  const applicationUrl = new URL(requestUrl.origin);
+  applicationUrl.hostname = dependencies.contentDomain;
+  return applicationUrl;
+}
+
+function versionSignInHtml(openUrl: string): string {
+  const href = escapeHtmlAttribute(openUrl);
+  return [
+    "<!doctype html>",
+    '<html lang="en">',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    "<title>Sign in to open this artifact</title>",
+    "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem}a{font-weight:600}</style>",
+    "<h1>Sign in to open this artifact</h1>",
+    "<p>This artifact is available to signed-in members of this Artifact Server.</p>",
+    `<p><a href="${href}">Sign in and open the artifact</a></p>`,
+    "</html>",
+  ].join("");
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function versionNotFoundResponse(): Response {

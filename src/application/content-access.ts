@@ -138,6 +138,18 @@ export interface IssueContentBootstrapCommand {
     | {readonly kind: "version"; readonly versionId: string};
 }
 
+/**
+ * Input for issuing one bootstrap to a signed-in browser that followed an
+ * artifact link. The link names no project: the moving latest link names the
+ * artifact, and an exact-version address names only its content host.
+ */
+export interface IssueBrowserContentBootstrapCommand {
+  readonly principal: Principal;
+  readonly target:
+    | {readonly artifactId: string; readonly kind: "latest"}
+    | {readonly contentToken: string; readonly kind: "version_origin"};
+}
+
 /** Input for exchanging a one-time bootstrap on its bound content host. */
 export interface ExchangeContentBootstrapCommand {
   readonly contentToken: string;
@@ -187,6 +199,9 @@ interface ContentAccessOperations {
   readonly exchangeContentBootstrap: (
     command: ExchangeContentBootstrapCommand,
   ) => Effect.Effect<IssuedContentSession, ContentAccessFailure>;
+  readonly issueBrowserContentBootstrap: (
+    command: IssueBrowserContentBootstrapCommand,
+  ) => Effect.Effect<IssuedContentBootstrap, ContentAccessFailure>;
   readonly issueContentBootstrap: (
     command: IssueContentBootstrapCommand,
   ) => Effect.Effect<IssuedContentBootstrap, ContentAccessFailure>;
@@ -293,6 +308,47 @@ function makeContentAccessService(
       token: secret.token,
       versionId: target.id,
     };
+  });
+
+  const issueBrowserContentBootstrap = Effect.fn(
+    "ContentAccessService.issueBrowserContentBootstrap",
+  )(function*(command: IssueBrowserContentBootstrapCommand) {
+    // The link supplies only the artifact or its version host; the project is
+    // read from storage, and the ordinary bootstrap path still checks that the
+    // principal may read that project and artifact.
+    if (command.target.kind === "latest") {
+      const current = yield* dependencies.repository.findCurrentVersion(
+        null,
+        command.target.artifactId,
+      );
+      if (current === null) {
+        return yield* Effect.fail(
+          new ArtifactNotFound({message: "The artifact does not exist."}),
+        );
+      }
+      return yield* issueContentBootstrap({
+        artifactId: current.artifact.id,
+        principal: command.principal,
+        projectId: current.artifact.projectId,
+        target: {kind: "current"},
+      });
+    }
+    const version = yield* dependencies.repository.findVersionContent(
+      command.target.contentToken,
+      "",
+      "none",
+    );
+    if (version === null) {
+      return yield* Effect.fail(
+        new VersionNotFound({message: "The saved version does not exist."}),
+      );
+    }
+    return yield* issueContentBootstrap({
+      artifactId: version.artifactId,
+      principal: command.principal,
+      projectId: version.projectId,
+      target: {kind: "version", versionId: version.versionId},
+    });
   });
 
   const issuePreviewLease = Effect.fn(
@@ -430,6 +486,7 @@ function makeContentAccessService(
     authorizePreviewContent,
     authorizeVersionContent,
     exchangeContentBootstrap,
+    issueBrowserContentBootstrap,
     issueContentBootstrap,
     issuePreviewLease,
     resolvePublicArtifact,

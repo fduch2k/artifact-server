@@ -1827,6 +1827,20 @@ requirements:
     depends_on: [AUTH-010, AUTH-022, AUTH-027]
     evidence: []
 
+  - id: AUTH-038
+    kind: behavior
+    behavior: A person's browser that opens a private latest link or exact-version address without a session is sent through this installation's sign-in and back to that link, and a signed-in reader receives that version's one-time content bootstrap; programs, embedded resources, a browser whose content cookie did not stick, and people without access get no redirect loop, bootstrap, or private bytes.
+    owner: authorization
+    source: {file: decisions/0035-private-links-sign-in.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-038-B, description: "A signed-out browser opening a private latest link signs in through a real stub OIDC provider and returns to that link, which then opens the current version through a bootstrap; an exact-version file opened from elsewhere goes through the application origin and sign-in back to the same file of the same version, also after a newer version is published; a public latest link still opens without sign-in; and a local owner's fresh browser is sent to the management application, which creates its session and resumes the link."}
+      failure: {id: AUTH-038-F, description: "Programs, image and frame loads, and HEAD requests keep 401 CONTENT_NOT_PUBLIC without a redirect; a navigation from the same version host or without fetch metadata gets a non-cacheable sign-in page instead of another redirect and no private bytes; a forged session counts as signed out; a member without access to a restricted artifact gets ARTIFACT_NOT_FOUND and no bootstrap from both routes; and unknown or malformed version hosts issue nothing."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-038-B and AUTH-038-F run against the local SQLite server in private-team mode with a stub OIDC provider and in local-owner mode, and a Chromium run opens both links from a fresh profile in local-owner mode. No private-team browser run, Postgres or D1 run, or deployment-specific evidence is recorded.
+    depends_on: [AUTH-002, AUTH-014, AUTH-015, AUTH-019, AUTH-026]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.
