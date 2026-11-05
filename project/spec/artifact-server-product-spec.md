@@ -147,6 +147,13 @@ An account-required site must authorize its HTML and every relative asset withou
 4. The cookie is valid only for that immutable version origin and read-only `GET` and `HEAD` requests.
 5. The content origin has no endpoint that can change application or artifact data.
 
+A person's browser that opens the stable link or an exact-version address
+without the session it needs is sent through sign-in rather than shown an
+error, and returns to the same link. An exact-version address goes through
+the application origin, which issues a bootstrap for that version once the
+viewer is signed in. Programs and embedded resources still receive a 401
+([ADR 0035](decisions/0035-private-links-sign-in.md)).
+
 Private responses are not stored in a shared CDN cache in the first release. The current public version may use immutable CDN caching.
 
 The embedded Review viewer does not rely on this top-level cookie. For a private
