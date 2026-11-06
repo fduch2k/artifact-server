@@ -57,10 +57,15 @@ body {
   color: var(--as-text);
 }
 
+/*
+ * No `color` here: Tailwind's base layer already makes these controls inherit
+ * text color, and an unlayered declaration would beat every layered utility,
+ * so a filled button would paint the page text color instead of its own
+ * foreground and lose its label in one of the two themes.
+ */
 button,
 input,
 select {
-  color: inherit;
   font: inherit;
 }
 
