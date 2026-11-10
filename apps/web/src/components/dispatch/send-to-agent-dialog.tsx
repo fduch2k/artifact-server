@@ -5,6 +5,11 @@ import {ArrowDown01Icon} from "@hugeicons/core-free-icons";
 import {HugeiconsIcon} from "@hugeicons/react";
 
 import {api, type AgentDispatch, type AgentPresence} from "@/api/client";
+import {
+  acceptsSend,
+  agentLocationLine,
+  isWaitingMailbox,
+} from "@/components/dispatch/agent-destination";
 import type {DispatchBundle} from "@/components/dispatch/dispatch-bundle";
 import {
   maximumDispatchBundleSize,
@@ -116,13 +121,16 @@ async function createDispatchBatches(
  * Send one exact annotation set to an agent with an honest tier-aware control.
  *
  * The remembered destination is a per-principal, per-project convenience. A
- * disconnected remembered agent disables the main action instead of silently
- * choosing another. The caret remains available to pick a connected agent or
- * add the optional bundle note. Sets above the server's per-dispatch bound are
- * split into ordered batches while one human click remains the initiating act.
+ * disconnected remembered live agent disables the main action instead of
+ * silently choosing another; a mailbox agent stays a destination while it is
+ * away, because its queue waits for its next check. The caret remains
+ * available to pick another destination or add the optional bundle note. Sets
+ * above the server's per-dispatch bound are split into ordered batches while
+ * one human click remains the initiating act.
  */
 export function SendToAgentControl({
   agents,
+  artifact,
   buttonSize = "xs",
   buttonVariant = "outline",
   feedback,
@@ -137,6 +145,8 @@ export function SendToAgentControl({
 }: {
   /** The polled presence list, or null while the surface is reading it. */
   readonly agents: readonly AgentPresence[] | null;
+  /** The artifact being sent from; the note dialog lists agents that can read it. */
+  readonly artifact: {readonly artifactId: string; readonly projectId: string} | null;
   readonly buttonSize?: "default" | "sm" | "xs";
   readonly buttonVariant?: "default" | "outline" | "secondary";
   readonly feedback: DispatchFeedback;
@@ -182,7 +192,7 @@ export function SendToAgentControl({
   const rememberedDefault = rememberedPreference.storageKey === storageKey
     ? rememberedPreference.agent
     : null;
-  const knownConnected = agents?.filter((agent) => agent.connected) ?? null;
+  const knownSendable = agents?.filter(acceptsSend) ?? null;
   const rememberedAgent = agents?.find((agent) => agent.id === rememberedDefault?.id) ?? null;
   const rememberedDefaultMissing = agents !== null
     && rememberedDefault !== null
@@ -194,16 +204,16 @@ export function SendToAgentControl({
     setRememberedPreference({agent: null, storageKey});
   }, [rememberedDefaultMissing, storageKey]);
 
-  const mainAgent = rememberedAgent?.connected === true
+  const mainAgent = rememberedAgent !== null && acceptsSend(rememberedAgent)
     ? rememberedAgent
     : (rememberedDefault === null || rememberedDefaultMissing)
-        && knownConnected?.length === 1
-      ? knownConnected[0] ?? null
+        && knownSendable?.length === 1
+      ? knownSendable[0] ?? null
       : null;
-  const disconnectedDefaultName = rememberedAgent !== null && !rememberedAgent.connected
+  const disconnectedDefaultName = rememberedAgent !== null && !acceptsSend(rememberedAgent)
     ? rememberedAgent.displayName
     : null;
-  const noAgents = knownConnected !== null && knownConnected.length === 0;
+  const noAgents = knownSendable !== null && knownSendable.length === 0;
   const nothingToSend = openCount === 0;
   const mainReason = nothingToSend
     ? "Nothing open to send."
@@ -221,7 +231,7 @@ export function SendToAgentControl({
       : oneAgentLabel(mainAgent.displayName);
   const trimmedNote = note.trim();
   const noteTooLong = trimmedNote.length > maximumDispatchNoteCharacters;
-  const connectedDialogAgents = dialogAgents.filter((agent) => agent.connected);
+  const sendableDialogAgents = dialogAgents.filter(acceptsSend);
   const threadIds = bundle?.threadIds ?? [];
 
   const rememberAgent = (agent: AgentPresence): void => {
@@ -301,14 +311,14 @@ export function SendToAgentControl({
     attemptKeys.current = [];
     try {
       const [listedAgents, resolved] = await Promise.all([
-        api.agentPresence(),
+        api.agentPresence(artifact ?? undefined),
         resolveBundle(),
       ]);
       setDialogAgents(listedAgents);
       setBundle(resolved);
       const preferred = listedAgents.find((agent) =>
-        agent.id === rememberedDefault?.id && agent.connected
-      ) ?? listedAgents.find((agent) => agent.connected) ?? null;
+        agent.id === rememberedDefault?.id && acceptsSend(agent)
+      ) ?? listedAgents.find(acceptsSend) ?? null;
       setAgentId(preferred?.id ?? null);
       setNow(Date.now());
     } catch (caught) {
@@ -336,7 +346,7 @@ export function SendToAgentControl({
 
   const sendWithNote = async (): Promise<void> => {
     const chosen = dialogAgents.find((agent) =>
-      agent.id === agentId && agent.connected
+      agent.id === agentId && acceptsSend(agent)
     ) ?? null;
     if (chosen === null || bundle === null || threadIds.length === 0 || noteTooLong) return;
     const batches = dispatchBatches(threadIds);
@@ -360,7 +370,7 @@ export function SendToAgentControl({
     }
   };
 
-  const menuAgents = knownConnected?.filter((agent) =>
+  const menuAgents = knownSendable?.filter((agent) =>
     mainAgent === null || agent.id !== mainAgent.id
   ) ?? [];
   const caretDisabled = agents === null || noAgents || nothingToSend || quickPending;
@@ -427,8 +437,13 @@ export function SendToAgentControl({
                     <span className="min-w-0">
                       <strong className="block truncate text-sm">{agent.displayName}</strong>
                       <span className="block truncate text-xs text-muted-foreground">
-                        {agent.workingDirectory}
+                        {agentLocationLine(agent)}
                       </span>
+                      {isWaitingMailbox(agent) ? (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          Mailbox — delivered on its next check
+                        </span>
+                      ) : null}
                     </span>
                   </button>
                 ))}
@@ -469,7 +484,7 @@ export function SendToAgentControl({
 
           {loading ? (
             <p className="text-sm text-muted-foreground">Reading connected agents…</p>
-          ) : connectedDialogAgents.length === 0 ? (
+          ) : sendableDialogAgents.length === 0 ? (
             <p className="text-sm leading-6 text-muted-foreground">
               No agent connected — connect one to send.
             </p>
@@ -477,14 +492,14 @@ export function SendToAgentControl({
             <>
               <fieldset className="grid gap-2">
                 <legend className="mb-2 text-xs font-semibold tracking-wide uppercase">
-                  Connected agents
+                  Agents
                 </legend>
                 {dialogAgents.map((agent) => (
                   <label className="flex items-start gap-3 border p-3" key={agent.id}>
                     <input
                       checked={agentId === agent.id}
                       className="mt-1 size-4 accent-primary"
-                      disabled={!agent.connected || pending}
+                      disabled={!acceptsSend(agent) || pending}
                       name={`${dialogId}-agent`}
                       onChange={() => {
                         setAgentId(agent.id);
@@ -503,12 +518,14 @@ export function SendToAgentControl({
                         {agent.displayName}
                       </span>
                       <span className="block font-mono text-xs break-all text-muted-foreground">
-                        {agent.workingDirectory}
+                        {agentLocationLine(agent)}
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         {agent.connected
                           ? "Connected"
-                          : `Not connected, last seen ${formatRelativeTime(agent.lastSeenAt, now)}`}
+                          : isWaitingMailbox(agent)
+                            ? `Mailbox, last checked ${formatRelativeTime(agent.lastSeenAt, now)} — delivered on its next check`
+                            : `Not connected, last seen ${formatRelativeTime(agent.lastSeenAt, now)}`}
                       </span>
                     </span>
                   </label>
@@ -541,7 +558,7 @@ export function SendToAgentControl({
             <DialogClose render={<Button type="button" variant="ghost" />}>
               Cancel
             </DialogClose>
-            {connectedDialogAgents.length === 0 ? null : (
+            {sendableDialogAgents.length === 0 ? null : (
               <Button
                 disabled={pending || loading || agentId === null
                   || threadIds.length === 0 || noteTooLong}

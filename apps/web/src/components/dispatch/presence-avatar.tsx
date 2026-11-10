@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from "react";
 
 import type { AgentPresence } from "@/api/client";
+import { isWaitingMailbox } from "@/components/dispatch/agent-destination";
 import {
   Popover,
   PopoverContent,
@@ -83,6 +84,13 @@ const ringHeadings = {
   working: "Working",
 } satisfies Record<PresenceRing, string>;
 
+/** The state in one word; a mailbox that is away is still a destination. */
+function presenceHeading(agent: AgentPresence, ring: PresenceRing): string {
+  return ring === "disconnected" && isWaitingMailbox(agent)
+    ? "Mailbox"
+    : ringHeadings[ring];
+}
+
 /** One sentence saying what the ring means, in words instead of motion. */
 export function presenceSentence(
   agent: AgentPresence,
@@ -99,9 +107,13 @@ export function presenceSentence(
     case "replying":
       return "Replying — writing back to the annotations it was sent.";
     case "disconnected":
-      return `Not connected — last seen ${
-        formatRelativeTime(agent.lastSeenAt, now)
-      }. Restart the agent in its working directory to reconnect.`;
+      return isWaitingMailbox(agent)
+        ? `Mailbox — last checked its inbox ${
+          formatRelativeTime(agent.lastSeenAt, now)
+        }. A send waits in its queue and is delivered on its next check.`
+        : `Not connected — last seen ${
+          formatRelativeTime(agent.lastSeenAt, now)
+        }. Restart the agent in its working directory to reconnect.`;
   }
   return ringHandled(ring);
 }
@@ -215,7 +227,7 @@ export function PresenceAvatar({
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger
-        aria-label={`${agent.displayName} — ${ringHeadings[ring]}`}
+        aria-label={`${agent.displayName} — ${presenceHeading(agent, ring)}`}
         className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onBlur={() => setOpen(false)}
         onFocus={() => setOpen(true)}
@@ -255,14 +267,26 @@ export function PresenceAvatar({
             </dt>
             <dd>{formatRelativeTime(agent.lastSeenAt, now)}</dd>
           </div>
-          <div className="flex justify-between gap-3">
-            <dt className="shrink-0 font-semibold tracking-wide uppercase">
-              Working directory
-            </dt>
-            <dd className="min-w-0 font-mono break-all">
-              {agent.workingDirectory}
-            </dd>
-          </div>
+          {agent.ownerDisplayName === undefined || agent.ownerDisplayName === null
+            ? null
+            : (
+              <div className="flex justify-between gap-3">
+                <dt className="shrink-0 font-semibold tracking-wide uppercase">
+                  Owner
+                </dt>
+                <dd className="min-w-0 break-all">{agent.ownerDisplayName}</dd>
+              </div>
+            )}
+          {agent.workingDirectory === null ? null : (
+            <div className="flex justify-between gap-3">
+              <dt className="shrink-0 font-semibold tracking-wide uppercase">
+                Working directory
+              </dt>
+              <dd className="min-w-0 font-mono break-all">
+                {agent.workingDirectory}
+              </dd>
+            </div>
+          )}
         </dl>
       </PopoverContent>
     </Popover>

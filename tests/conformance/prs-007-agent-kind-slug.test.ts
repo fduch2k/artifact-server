@@ -58,6 +58,7 @@ describe("registered agent kind widening", () => {
         beacon: null,
         connected: true,
         lastActivityAt: registration.agent.createdAt,
+        ownerDisplayName: null,
       },
     ]);
 

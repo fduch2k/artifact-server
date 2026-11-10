@@ -81,6 +81,8 @@ Answers `200 {"dispatch": {…}}` with the oldest queued dispatch for this agent
 
 The poll is the only liveness signal in the protocol. Each poll request bumps `lastSeenAt` once; `GET /api/v1/agents` reports `connected` when that stamp is within 90 seconds. A bridge that re-polls at the 25-second cap stays comfortably inside that window. There is no separate heartbeat route and none is needed.
 
+An agent acts for the principal that registered it. A send reaches it only when that principal can read every thread's artifact: a member's agent reads what the member owns or was given, and a service key's agent reads no restricted artifact. `GET /api/v1/agents?artifactId=…&projectId=…` lists only the agents that can read that artifact, and for another member's agent the listing withholds `workingDirectory`, `connectionKey`, and `agentSessionId` and names the member in `ownerDisplayName`.
+
 A successful claim sets the dispatch to `claimed` under a five-minute lease. While this agent holds a `claimed` dispatch, the route answers `204`: one active claim per agent. Dispatches in `delivered` do not block the next claim, because the host's own follow-up queue orders them. An expired lease returns the dispatch to `queued` and it is redelivered.
 
 Treat `404` or `403` on this route as an instruction to register again on the next pass. The agent row was reaped or now belongs to another principal, and polling that ID again can never succeed.
@@ -133,7 +135,7 @@ Answers `204`. A courtesy teardown that deletes the agent row when the host sess
 | `claimed` | `queued` | The five-minute lease expires. |
 | `claimed` | `delivered` | The bridge reports delivered. |
 | `delivered` | `addressed` | Every thread in the bundle is resolved. Inferred, never reported. |
-| `queued`, `claimed`, `delivered` | `failed` | The bridge reports failed, or the target agent's heartbeat is more than 15 minutes stale while the dispatch is still queued. |
+| `queued`, `claimed`, `delivered` | `failed` | The bridge reports failed, or the target agent's heartbeat is more than 15 minutes stale while the dispatch is still queued. A `mailbox` agent has no heartbeat, so its queue waits for its next inbox check and fails this way only once its registration is reaped after seven days unseen. |
 | `queued`, `claimed` | `canceled` | A human cancels. |
 
 Terminal states never transition. `failed` and `canceled` clear the thread markers so the annotations return to the human's view; work is never silently lost.

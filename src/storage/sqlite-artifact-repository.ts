@@ -158,6 +158,10 @@ import {
   storedAccessSetting,
 } from "./restricted-access-storage.js";
 import {
+  mailboxAgentSql,
+  recipientCannotReadMessage,
+} from "./agent-dispatch-storage.js";
+import {
   defaultGitHistoryMaximumCopiedFiles,
   type GitHistoryLimits,
 } from "../git-history/git-history-capability.js";
@@ -540,6 +544,7 @@ const agentDispatchRowSchema = z.object({
 const dispatchThreadCheckRowSchema = z.object({
   dispatchId: z.string().nullable(),
   id: z.string(),
+  recipientCanRead: z.union([z.literal(0), z.literal(1)]),
   state: commentThreadStateSchema,
 });
 const threadIdsSchema = z.array(z.string());
@@ -4038,18 +4043,23 @@ export class SqliteArtifactRepository implements
         // the same transaction that stamps the markers, so two concurrent
         // sends can never double-book a thread and a rejected bundle leaves
         // no partial markers behind.
-        // A thread of a restricted artifact the sender cannot see counts as missing.
+        // A thread of a restricted artifact the sender cannot see counts as
+        // missing; one the target agent's owner cannot see refuses the send.
         const checkThread = this.#database.prepare(
-          `SELECT thread.id AS id, thread.state AS state, thread.dispatch_id AS dispatchId
+          `SELECT thread.id AS id, thread.state AS state, thread.dispatch_id AS dispatchId,
+             CASE WHEN ${restrictedScopeSql("artifact")} THEN 1 ELSE 0 END
+               AS recipientCanRead
            FROM comment_threads thread
            JOIN artifacts artifact ON artifact.id = thread.artifact_id
            WHERE thread.id = ? AND thread.installation_id = ? AND thread.project_id = ?
              AND ${restrictedScopeSql("artifact")}`,
         );
+        const recipientScope = restrictedScopeParameters(command.recipientScope);
         const restrictedScope = restrictedScopeParameters(command.restrictedScope);
         for (const threadId of command.threadIds) {
           const row = dispatchThreadCheckRowSchema.nullable().parse(
             checkThread.get(
+              ...recipientScope,
               threadId,
               command.installationId,
               command.projectId,
@@ -4071,6 +4081,11 @@ export class SqliteArtifactRepository implements
             throw new InvalidDispatch({
               message:
                 "The bundle references a comment thread that is already dispatched.",
+            });
+          }
+          if (row.recipientCanRead !== 1) {
+            throw new InvalidDispatch({
+              message: recipientCannotReadMessage,
             });
           }
         }
@@ -4454,8 +4469,9 @@ export class SqliteArtifactRepository implements
 
   /**
    * The lazy transition set applied on the read path, in machine order:
-   * an expired claim lease returns to queued, a queued dispatch whose agent
-   * stopped polling fails as agent_unavailable, and a delivered dispatch
+   * an expired claim lease returns to queued, a queued dispatch whose live
+   * agent stopped polling (a mailbox agent's queue waits for its next check)
+   * fails as agent_unavailable, and a delivered dispatch
    * whose every bundle thread is resolved is stamped addressed once.
    */
   #applyLazyDispatchTransitions(
@@ -4477,7 +4493,8 @@ export class SqliteArtifactRepository implements
            updated_at = ?, claimed_at = NULL, lease_expires_at = NULL
          WHERE id = ? AND state = 'queued' AND NOT EXISTS (
            SELECT 1 FROM registered_agents a
-           WHERE a.id = agent_dispatches.agent_id AND a.last_seen_at >= ?
+           WHERE a.id = agent_dispatches.agent_id
+             AND (a.last_seen_at >= ? OR ${mailboxAgentSql("a", "sqlite")})
          )`,
       )
       .run(
@@ -4513,7 +4530,8 @@ export class SqliteArtifactRepository implements
          WHERE d.installation_id = ? AND d.project_id = ? AND d.state = 'queued'
            AND NOT EXISTS (
              SELECT 1 FROM registered_agents a
-             WHERE a.id = d.agent_id AND a.last_seen_at >= ?
+             WHERE a.id = d.agent_id
+               AND (a.last_seen_at >= ? OR ${mailboxAgentSql("a", "sqlite")})
            )`,
       )
       .all(

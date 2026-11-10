@@ -180,7 +180,8 @@ describe("artifact owners and restricted access", () => {
     const thread = await commentOn(ada, draft.id, next.body.version.id);
     expect((await request(administratorActor(), "GET", `${draft.id}/comments`))
       .status).toBe(200);
-    const agent = await registerAgent(service);
+    // Ada's own agent reads her restricted draft, so it can be sent there (ADR 0036).
+    const agent = await registerAgent(ada);
     expect((await dispatch(ada, agent, [thread])).status).toBe(201);
 
     expect(await listedNames(ben)).not.toContain("Ada's draft");

@@ -359,6 +359,9 @@ const agentDispatchStateSchema = z.enum([
   agentDispatchStates.failed,
   agentDispatchStates.queued,
 ]);
+const agentListQuerySchema = z.object({
+  artifactId: z.string().min(1).max(200).optional(),
+});
 const agentDispatchPageQuerySchema = z.object({
   agentId: agentIdSchema.optional(),
   cursor: z.string().max(1_024).optional(),
@@ -1295,11 +1298,18 @@ export function createHttpApp(
   });
 
   app.get("/api/v1/agents", async (context) => {
+    const query = agentListQuerySchema.parse(context.req.query());
     const agents = await runHttpApplicationEffect(
       context,
       dependencies,
       AgentDispatchService.use((dispatches) =>
-        dispatches.listAgents({principal: context.get("principal")})
+        dispatches.listAgents({
+          artifact: query.artifactId === undefined ? null : {
+            artifactId: query.artifactId,
+            projectId: requestedProjectId(context),
+          },
+          principal: context.get("principal"),
+        })
       ),
     );
     return context.json({items: agents.map(connectedAgentResponse)});
@@ -3316,8 +3326,14 @@ function registeredAgentResponse(agent: RegisteredAgentRecord) {
 }
 
 function connectedAgentResponse(entry: ConnectedRegisteredAgent) {
+  const registered = registeredAgentResponse(entry.agent);
   return {
-    ...registeredAgentResponse(entry.agent),
+    ...registered,
+    // Where another member's agent runs stays with that member.
+    agentSessionId: entry.locationVisible ? registered.agentSessionId : null,
+    connectionKey: entry.locationVisible ? registered.connectionKey : null,
+    ownerDisplayName: entry.owner.kind === "member" ? entry.owner.displayName : null,
+    workingDirectory: entry.locationVisible ? registered.workingDirectory : null,
     activeDispatchId: entry.activeDispatchId,
     activity: entry.activity,
     beacon: entry.beacon,

@@ -2455,6 +2455,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         installationId: dispatchIdentity.installationId,
         note: "Fix both before the review.",
         projectId: defaultProjectId,
+        recipientScope: {kind: "all"},
         restrictedScope: {kind: "all"},
         sender,
         threadIds: [firstThreadId, secondThreadId],
@@ -2474,6 +2475,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         installationId: dispatchIdentity.installationId,
         note: "Fix both before the review.",
         projectId: defaultProjectId,
+        recipientScope: {kind: "all"},
         restrictedScope: {kind: "all"},
         sender,
         threadIds: [firstThreadId, secondThreadId],
@@ -2510,6 +2512,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         installationId: dispatchIdentity.installationId,
         note: null,
         projectId: defaultProjectId,
+        recipientScope: {kind: "all"},
         restrictedScope: {kind: "all"},
         sender,
         threadIds: [secondThreadId, thirdThreadId],
@@ -2574,6 +2577,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         installationId: dispatchIdentity.installationId,
         note: null,
         projectId: defaultProjectId,
+        recipientScope: {kind: "all"},
         restrictedScope: {kind: "all"},
         sender,
         threadIds: [thirdThreadId],
@@ -2667,6 +2671,137 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     await server.stop();
   });
 
+  test("external-storage foundation: Postgres keeps a stale mailbox agent's queue and refuses a send its agent's owner cannot read (DSP-014, DSP-015)", async () => {
+    expect.hasAssertions();
+    const identity = {
+      apiToken: managedTestKey("postgres-dispatch-reach"),
+      installationId: `postgres-dispatch-reach-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(environment, identity);
+    const published = await publishNew(server.baseUrl, identity.apiToken, {
+      content: "<p>dispatch reach target</p>",
+      idempotencyKey: `dispatch-reach-publish-${randomUUID()}`,
+      name: "Dispatch reach target",
+    });
+    const artifactId = published.body.artifact.id;
+    const versionId = published.body.version.id;
+    const projectId = published.body.artifact.projectId;
+    const sender = managedTestPrincipal(identity.apiToken);
+    const annotate = async (body: string): Promise<string> => {
+      const created = await createCommentThread(
+        server.baseUrl,
+        identity.apiToken,
+        {artifactId, versionId},
+        `dispatch-reach-thread-${randomUUID()}`,
+        {body, path: "index.html"},
+      );
+      expect(created.response.status).toBe(201);
+      return commentCreationSchema.parse(created.body).thread.id;
+    };
+    const [restrictedThread, mailboxThread, liveThread] = [
+      await annotate("Only the owner's agent may read this."),
+      await annotate("Queue this for the mailbox."),
+      await annotate("Send this to the live agent."),
+    ];
+    const baseInstant = Date.now();
+    const at = (offsetMilliseconds: number): string =>
+      new Date(baseInstant + offsetMilliseconds).toISOString();
+    const database = await PostgresDatabase.open({
+      maxConnections: 2,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    try {
+      const repository = await PostgresArtifactRepository.open(
+        database,
+        identity.installationId,
+      );
+      await repository.changeAccessSetting({
+        accessSetting: "restricted",
+        artifactId,
+        authorizedByPrincipalId: null,
+        createdAt: at(0),
+        expectedCurrentVersionId: versionId,
+        idempotencyKey: `dispatch-reach-restrict-${randomUUID()}`,
+        inputDigest: "dispatch-reach-restrict",
+        principalId: sender.principalId,
+        projectId,
+      });
+      const register = (displayName: string, evidence: "mailbox" | "native") =>
+        repository.registerAgent({
+          agentSessionId: null,
+          capabilities: {beacon: false, evidence},
+          connectionKey: `dispatch-reach-${displayName}-${randomUUID()}`,
+          displayName,
+          id: `agt_${randomUUID()}`,
+          installationId: identity.installationId,
+          kind: evidence === "mailbox" ? "mcp-mailbox" : "pi",
+          principalId: sender.principalId,
+          registeredAt: at(0),
+          workingDirectory: "/work/reach",
+        });
+      const mailbox = await register("inbox", "mailbox");
+      const live = await register("live", "native");
+      const send = (
+        agent: typeof mailbox,
+        threadId: string,
+        recipientScope: Parameters<typeof repository.createDispatch>[0]["recipientScope"],
+      ) => repository.createDispatch({
+        agentDisplayName: agent.displayName,
+        agentId: agent.id,
+        createdAt: at(1_000),
+        id: `dsp_${randomUUID()}`,
+        idempotencyKey: `dispatch-reach-send-${randomUUID()}`,
+        installationId: identity.installationId,
+        note: null,
+        projectId,
+        recipientScope,
+        restrictedScope: {kind: "all"},
+        sender,
+        threadIds: [threadId],
+      });
+
+      // DSP-015: an agent whose owner cannot read the restricted artifact is
+      // refused, and the refusal leaves the thread free for a send that can.
+      await expect(send(mailbox, restrictedThread, {kind: "none"}))
+        .rejects.toMatchObject({_tag: "InvalidDispatch"});
+      await expect(send(
+        mailbox,
+        restrictedThread,
+        {kind: "member", principalId: "member_someone_else"},
+      )).rejects.toMatchObject({_tag: "InvalidDispatch"});
+      const ownerScope = {kind: "member", principalId: sender.principalId} as const;
+      expect((await send(live, restrictedThread, ownerScope)).dispatch.state)
+        .toBe("queued");
+      const toMailbox = await send(mailbox, mailboxThread, ownerScope);
+      const toLive = await send(live, liveThread, ownerScope);
+
+      // DSP-014: past the 15-minute backstop a live agent's queue fails while
+      // a mailbox's waits, on both the single and the project-wide read path.
+      const later = at(20 * 60 * 1_000);
+      expect(await repository.findDispatch(identity.installationId, toLive.dispatch.id, later))
+        .toMatchObject({failureReason: "agent_unavailable", state: "failed"});
+      expect(await repository.findDispatch(identity.installationId, toMailbox.dispatch.id, later))
+        .toMatchObject({failureReason: null, state: "queued"});
+      const hoursLater = at(6 * 60 * 60 * 1_000);
+      const page = await repository.listDispatches({
+        agentId: null,
+        cursor: null,
+        installationId: identity.installationId,
+        limit: 10,
+        now: hoursLater,
+        projectId,
+        state: null,
+      });
+      expect(page.items.find(({id}) => id === toMailbox.dispatch.id)?.state)
+        .toBe("queued");
+      expect(await repository.claimNextDispatch(mailbox.id, hoursLater, true))
+        .toMatchObject({id: toMailbox.dispatch.id, state: "claimed"});
+    } finally {
+      await database.close();
+      await server.stop();
+    }
+  });
+
   test("external-storage foundation: Postgres protects dispatched comments atomically through every dispatch state", async () => {
     expect.hasAssertions();
     const identity = {
@@ -2735,6 +2870,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         installationId: identity.installationId,
         note: null,
         projectId: defaultProjectId,
+        recipientScope: {kind: "all"},
         restrictedScope: {kind: "all"},
         sender,
         threadIds: [threadId],

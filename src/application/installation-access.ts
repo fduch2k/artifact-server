@@ -8,6 +8,7 @@ import {
   type AuthenticationCachePolicy,
   defaultAuthenticationCachePolicy,
 } from "./authentication-cache.js";
+import type {AgentOwner} from "../core/agent-reach.js";
 import {
   AuthenticationRequired,
   AuthorizationDenied,
@@ -332,6 +333,13 @@ export interface InstallationAccessOperations {
     readonly MemberDirectoryEntry[],
     AuthorizationDenied | IdentityRepositoryFailure
   >;
+  /**
+   * Who each principal that registered an agent acts for: an active member,
+   * a former member, or a service principal when no member carries that id.
+   */
+  readonly resolveAgentOwners: (
+    principalIds: readonly string[],
+  ) => Effect.Effect<ReadonlyMap<string, AgentOwner>, IdentityRepositoryFailure>;
   /** One active member of this installation, checked before sharing with them. */
   readonly findActiveMember: (
     memberId: string,
@@ -762,6 +770,26 @@ function makeInstallationAccessService(
       .map(memberDirectoryEntry);
   });
 
+  const resolveAgentOwners = Effect.fn(
+    "InstallationAccessService.resolveAgentOwners",
+  )(function*(principalIds: readonly string[]) {
+    if (principalIds.length === 0) return new Map<string, AgentOwner>();
+    const members = new Map(
+      (yield* dependencies.repository.listMembers(dependencies.installationId))
+        .map((member) => [member.id, member]),
+    );
+    return new Map(principalIds.map((principalId): [string, AgentOwner] => {
+      const member = members.get(principalId);
+      if (member === undefined) return [principalId, {kind: "service", principalId}];
+      return [
+        principalId,
+        member.status === memberStatuses.active
+          ? {displayName: member.displayName, kind: "member", principalId}
+          : {kind: "former-member", principalId},
+      ];
+    }));
+  });
+
   const findActiveMember = Effect.fn(
     "InstallationAccessService.findActiveMember",
   )(function*(memberId: string) {
@@ -1055,6 +1083,7 @@ function makeInstallationAccessService(
     listMembers,
     listPersonalApiKeys,
     loginWithLocalBrowserToken,
+    resolveAgentOwners,
     revokeApiKey,
     revokePersonalApiKey,
     revokeSession,

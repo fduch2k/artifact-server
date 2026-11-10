@@ -80,7 +80,11 @@ const agentListSchema = z.object({
     activity: z.enum(["disconnected", "idle", "working"]),
     beacon: z.enum(["replying", "thinking"]).nullable(),
     connected: z.boolean(),
+    // Another member's agent keeps where it runs private.
+    connectionKey: z.string().nullable(),
     lastActivityAt: z.iso.datetime(),
+    ownerDisplayName: z.string().nullable(),
+    workingDirectory: z.string().nullable(),
   }).strict()),
 }).strict();
 const dispatchSchema = z.object({

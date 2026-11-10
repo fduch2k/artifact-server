@@ -572,15 +572,19 @@ const registeredAgentSchema = z.object({
   agentSessionId: z.string().nullable(),
   /** Derived from the agent's own claim polling; the poll is the heartbeat. */
   connected: z.boolean(),
-  connectionKey: z.string(),
+  /** Null for another member's agent: where it runs stays with that member. */
+  connectionKey: z.string().nullable(),
   createdAt: z.string(),
   displayName: z.string(),
   id: z.string(),
   /** Open slug, matching the server (`registeredAgentKindPattern`): nothing branches on it. */
   kind: z.string(),
   lastSeenAt: z.string(),
+  /** The member the agent acts for; null for a service key's agent. */
+  ownerDisplayName: z.string().nullable().optional(),
   principalId: z.string(),
-  workingDirectory: z.string(),
+  /** Null for another member's agent: where it runs stays with that member. */
+  workingDirectory: z.string().nullable(),
 });
 
 const agentDispatchStateSchema = z.enum([
@@ -671,7 +675,8 @@ const agentPresenceSchema = z.object({
   }).optional(),
   /** Derived from the agent's own claim polling; the poll is the heartbeat. */
   connected: z.boolean(),
-  connectionKey: z.string(),
+  /** Null for another member's agent: where it runs stays with that member. */
+  connectionKey: z.string().nullable(),
   createdAt: z.string(),
   displayName: z.string(),
   id: z.string(),
@@ -679,8 +684,11 @@ const agentPresenceSchema = z.object({
   kind: z.string(),
   lastActivityAt: z.string().optional(),
   lastSeenAt: z.string(),
+  /** The member the agent acts for; null for a service key's agent. */
+  ownerDisplayName: z.string().nullable().optional(),
   principalId: z.string(),
-  workingDirectory: z.string(),
+  /** Null for another member's agent: where it runs stays with that member. */
+  workingDirectory: z.string().nullable(),
 });
 
 export type AgentActivity = z.infer<typeof agentActivitySchema>;
@@ -1424,10 +1432,15 @@ export const api = {
     `/api/v1/personal-api-keys/${encodeURIComponent(keyId)}/revoke`,
     { headers: mutationHeaders(), method: "POST" },
   ).then(({ apiKey }) => apiKey),
-  /** The registered agents with their derived presence, for live surfaces. */
-  agentPresence: () => request(
+  /**
+   * The registered agents with their derived presence, for live surfaces.
+   * Given an artifact, only agents whose owner can read it are listed.
+   */
+  agentPresence: (artifact?: { artifactId: string; projectId: string }) => request(
     z.object({ items: z.array(agentPresenceSchema) }),
-    "/api/v1/agents",
+    artifact === undefined
+      ? "/api/v1/agents"
+      : `/api/v1/agents?${new URLSearchParams(artifact).toString()}`,
   ).then(({ items }) => items),
   /**
    * Delete this artifact's resolved (or all) comment threads in one action.

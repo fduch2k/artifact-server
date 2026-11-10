@@ -167,8 +167,8 @@ describe("restricted artifacts shared with named members", () => {
     const thread = await commentOn(ben, metrics.id, metrics.currentVersionId);
     expect((await request(ben, "GET", artifactPath(metrics.id, "/comments"))).status)
       .toBe(200);
-    // Agents register as service principals; Ben sends his thread to one.
-    const agent = await registerAgent(service);
+    // Ben sends his thread to his own agent, which reads what he was given (ADR 0036).
+    const agent = await registerAgent(ben);
     expect((await dispatch(ben, agent, [thread])).status).toBe(201);
 
     // Carl, who was not added, still cannot find it.

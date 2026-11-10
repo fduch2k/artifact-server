@@ -189,9 +189,16 @@ function toolAgent(agent: AgentPresence) {
   };
 }
 
-async function readAgents(): Promise<readonly ReturnType<typeof toolAgent>[]> {
+/** The agents this page could send to: those whose owner can read its artifact. */
+async function readAgents(
+  snapshot: WebmcpSnapshot,
+): Promise<readonly ReturnType<typeof toolAgent>[]> {
   try {
-    return (await api.agentPresence()).map(toolAgent);
+    return (await api.agentPresence(
+      snapshot.artifact === null || snapshot.projectId === ""
+        ? undefined
+        : {artifactId: snapshot.artifact.id, projectId: snapshot.projectId},
+    )).map(toolAgent);
   } catch {
     return [];
   }
@@ -273,7 +280,7 @@ async function assembleView(
     : openFirst.filter((thread) => thread.state === stateFilter);
   const pageItems = filtered.slice(offset, offset + limit);
   const [agents, activeDispatches] = await Promise.all([
-    readAgents(),
+    readAgents(snapshot),
     readActiveDispatches(snapshot.projectId),
   ]);
   return {

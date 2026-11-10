@@ -497,6 +497,11 @@ export interface CreateAgentDispatch {
   readonly installationId: string;
   readonly note: string | null;
   readonly projectId: string;
+  /**
+   * What the target agent's owner can read. A thread of a restricted artifact
+   * outside this scope refuses the whole send: the agent could not read it.
+   */
+  readonly recipientScope: RestrictedArtifactScope;
   /** Threads of restricted artifacts outside this scope count as missing. */
   readonly restrictedScope: RestrictedArtifactScope;
   readonly sender: CommentAuthor;
