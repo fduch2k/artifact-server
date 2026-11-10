@@ -39,6 +39,10 @@ import {
   storedAccessSetting,
 } from "../../../src/storage/restricted-access-storage.js";
 import {
+  mailboxAgentSql,
+  recipientCannotReadMessage,
+} from "../../../src/storage/agent-dispatch-storage.js";
+import {
   accessSettings,
   agentBeaconStates,
   agentDispatchStates,
@@ -510,6 +514,7 @@ const agentDispatchRowSchema = z.object({
 const dispatchThreadCheckRowSchema = z.object({
   dispatchId: z.string().nullable(),
   id: z.string(),
+  recipientCanRead: z.union([z.literal(0), z.literal(1)]),
   state: commentThreadStateSchema,
 });
 const dispatchCandidateRowSchema = z.object({
@@ -1412,8 +1417,9 @@ export function createD1ArtifactRepository(
   `).bind(now, now, ...scopeBindings);
   /**
    * The lazy transition set applied on the read path, in machine order: an
-   * expired claim lease returns to queued, a queued dispatch whose agent
-   * stopped polling fails as agent_unavailable and releases its threads, and a
+   * expired claim lease returns to queued, a queued dispatch whose live agent
+   * stopped polling (a mailbox agent's queue waits for its next check) fails
+   * as agent_unavailable and releases its threads, and a
    * delivered dispatch whose every bundle thread is resolved is stamped
    * addressed once. Each statement carries its own precondition, so the batch
    * is one atomic pass whichever transitions apply.
@@ -1435,7 +1441,8 @@ export function createD1ArtifactRepository(
         updated_at = ?, claimed_at = NULL, lease_expires_at = NULL
       WHERE ${scope} AND state = 'queued' AND NOT EXISTS (
         SELECT 1 FROM registered_agents a
-        WHERE a.id = agent_dispatches.agent_id AND a.last_seen_at >= ?
+        WHERE a.id = agent_dispatches.agent_id
+          AND (a.last_seen_at >= ? OR ${mailboxAgentSql("a", "sqlite")})
       )
     `).bind(
       now,
@@ -1474,15 +1481,19 @@ export function createD1ArtifactRepository(
   ): Promise<void> => {
     if (command.threadIds.length === 0) return;
     const placeholders = command.threadIds.map(() => "?").join(", ");
-    // A thread of a restricted artifact the sender cannot see counts as missing.
+    // A thread of a restricted artifact the sender cannot see counts as
+    // missing; one the target agent's owner cannot see refuses the send.
     const result = await database.prepare(`
-      SELECT thread.id, thread.state, thread.dispatch_id AS dispatchId
+      SELECT thread.id, thread.state, thread.dispatch_id AS dispatchId,
+        CASE WHEN ${restrictedScopeSql("artifact")} THEN 1 ELSE 0 END
+          AS recipientCanRead
       FROM comment_threads thread
       JOIN artifacts artifact ON artifact.id = thread.artifact_id
       WHERE thread.installation_id = ? AND thread.project_id = ?
         AND thread.id IN (${placeholders})
         AND ${restrictedScopeSql("artifact")}
     `).bind(
+      ...restrictedScopeParameters(command.recipientScope),
       command.installationId,
       command.projectId,
       ...command.threadIds,
@@ -1512,6 +1523,9 @@ export function createD1ArtifactRepository(
           message:
             "The bundle references a comment thread that is already dispatched.",
         });
+      }
+      if (row.recipientCanRead !== 1) {
+        throw new InvalidDispatch({message: recipientCannotReadMessage});
       }
     }
   };

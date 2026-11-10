@@ -203,12 +203,12 @@ test.describe("Review send-all", () => {
       await expect(page.getByText("No agent connected — connect one to send."))
         .toBeVisible();
 
-      await connectAgent(fixture, {
+      const live = await connectAgent(fixture, {
         evidence: "native",
         key: "snd-002-live",
         name: "live",
       });
-      await connectAgent(fixture, {
+      const mailbox = await connectAgent(fixture, {
         evidence: "mailbox",
         key: "snd-002-mailbox",
         name: "mailbox",
@@ -241,37 +241,33 @@ test.describe("Review send-all", () => {
       );
       await expect.poll(rememberedDestination).toContain('"displayName":"mailbox"');
 
-      // A stale heartbeat leaves the remembered row present but disconnected.
-      // A newly registered peer stays live, so silent fall-through would be
-      // observable if the control chose it.
+      const owner = new ApiClient(fixture.server, fixture.installation.apiToken);
+      const dispatchCount = async (): Promise<number> => dispatchPageSchema.parse(
+        await (await owner.listDispatches("prj_default")).json(),
+      ).items.length;
+
+      // A mailbox is a queue: once it stops checking in it stays the remembered
+      // destination, says so, and the send waits for its next check.
       fixture.clock.advance(100_000);
       const replacement = await connectAgent(fixture, {
         evidence: "native",
         key: "snd-002-replacement",
         name: "replacement",
       });
-      await expect(page.getByText("mailbox disconnected — pick another"))
+      await expect(page.getByText("1 connected · 1 mailbox · 1 offline"))
         .toBeVisible({timeout: 20_000});
-      const owner = new ApiClient(fixture.server, fixture.installation.apiToken);
-      const before = dispatchPageSchema.parse(
-        await (await owner.listDispatches("prj_default")).json(),
-      ).items.length;
-      await expect(page.getByRole("button", {
-        name: "Send all open (1) to mailbox",
-      })).toBeDisabled();
-      expect(dispatchPageSchema.parse(
-        await (await owner.listDispatches("prj_default")).json(),
-      ).items).toHaveLength(before);
+      await expect(page.getByText("mailbox disconnected — pick another"))
+        .toHaveCount(0);
+      const beforeQueued = await dispatchCount();
+      await page.getByRole("button", {name: "Send all open (1) to mailbox"}).click();
+      await expect(page.getByText(
+        "Queued for mailbox — it picks this up when it next checks in.",
+      )).toBeVisible();
+      await expect.poll(dispatchCount).toBe(beforeQueued + 1);
 
-      await page.getByRole("button", {
-        name: "Choose agent or send with a note",
-      }).first().click();
-      await page.getByRole("button", {name: "replacement /work/replacement"}).click();
-      await expect(page.getByText("Sent 1 thread to replacement")).toBeVisible();
-
-      // A clean disconnect deletes the registration. The dead id is not a
-      // disconnected default: it is forgotten, so the same bridge name under
-      // its new id becomes the ordinary one-connected-agent path.
+      // A live remembered agent whose heartbeat goes stale is different: the
+      // row stays present but disconnected, and a newly registered live peer
+      // would make a silent fall-through observable.
       await createThreadOverApi(fixture, {
         artifactId: published.artifact.id,
         body: "Third tier-aware comment",
@@ -280,24 +276,74 @@ test.describe("Review send-all", () => {
         versionId: published.version.id,
       });
       await page.getByRole("button", {name: "Reload"}).click();
+      await page.getByRole("button", {
+        name: "Choose agent or send with a note",
+      }).first().click();
+      await page.getByRole("button", {name: "replacement /work/replacement"}).click();
+      await expect(page.getByText("Sent 1 thread to replacement")).toBeVisible();
+      await expect.poll(rememberedDestination).toContain('"displayName":"replacement"');
+      await createThreadOverApi(fixture, {
+        artifactId: published.artifact.id,
+        body: "Fourth tier-aware comment",
+        idempotencyKey: "snd-002-fourth-thread",
+        path: "index.html",
+        versionId: published.version.id,
+      });
+      await page.getByRole("button", {name: "Reload"}).click();
+      fixture.clock.advance(100_000);
+      const late = await connectAgent(fixture, {
+        evidence: "native",
+        key: "snd-002-late",
+        name: "late",
+      });
+      await expect(page.getByText("replacement disconnected — pick another"))
+        .toBeVisible({timeout: 20_000});
+      const before = await dispatchCount();
       await expect(page.getByRole("button", {
         name: "Send all open (1) to replacement",
+      })).toBeDisabled();
+      expect(await dispatchCount()).toBe(before);
+
+      await page.getByRole("button", {
+        name: "Choose agent or send with a note",
+      }).first().click();
+      await page.getByRole("button", {name: "late /work/late"}).click();
+      await expect(page.getByText("Sent 1 thread to late")).toBeVisible();
+
+      // A clean disconnect deletes the registration. The dead id is not a
+      // disconnected default: it is forgotten, so the same bridge name under
+      // its new id becomes the ordinary one-connected-agent path.
+      await createThreadOverApi(fixture, {
+        artifactId: published.artifact.id,
+        body: "Fifth tier-aware comment",
+        idempotencyKey: "snd-002-fifth-thread",
+        path: "index.html",
+        versionId: published.version.id,
+      });
+      await page.getByRole("button", {name: "Reload"}).click();
+      await expect(page.getByRole("button", {
+        name: "Send all open (1) to late",
       })).toBeEnabled();
-      expect((await replacement.client.fetch(
-        `/api/v1/agents/${replacement.agentId}/disconnect`,
+      expect((await late.client.fetch(
+        `/api/v1/agents/${late.agentId}/disconnect`,
         {method: "POST"},
       )).status).toBe(204);
+      // The other agents leave too, so the restarted bridge is the only one.
+      const departures = await Promise.all([live, mailbox, replacement].map((gone) =>
+        gone.client.fetch(`/api/v1/agents/${gone.agentId}/disconnect`, {method: "POST"})
+      ));
+      expect(departures.map(({status}) => status)).toEqual([204, 204, 204]);
       const restarted = await connectAgent(fixture, {
         evidence: "native",
         key: "snd-002-restarted",
-        name: "replacement",
+        name: "late",
       });
-      expect(restarted.agentId).not.toBe(replacement.agentId);
-      await expect(page.getByText("replacement disconnected — pick another"))
+      expect(restarted.agentId).not.toBe(late.agentId);
+      await expect(page.getByText("late disconnected — pick another"))
         .toHaveCount(0, {timeout: 20_000});
       await expect(page.getByRole("button", {
-        name: "Send all open (1) to replacement",
-      })).toBeEnabled();
+        name: "Send all open (1) to late",
+      })).toBeEnabled({timeout: 20_000});
       await expect.poll(rememberedDestination).toBeNull();
       expect(first.id).toMatch(/^cmt_/u);
       expect(restarted.agentId).toMatch(/^agt_/u);

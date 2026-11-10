@@ -28,12 +28,19 @@ export const agentRegistrationSchema = z.object({
   agent: registeredAgentSchema,
   protocolVersion: z.literal(1),
 }).strict();
+/**
+ * One listed agent. Another member's agent keeps where it runs private, so
+ * its connection key, session, and working directory read as null.
+ */
 export const connectedAgentSchema = registeredAgentSchema.extend({
   activeDispatchId: z.string().nullable(),
   activity: z.enum(["disconnected", "idle", "working"]),
   beacon: z.enum(["replying", "thinking"]).nullable(),
   connected: z.boolean(),
+  connectionKey: z.string().nullable(),
   lastActivityAt: z.iso.datetime(),
+  ownerDisplayName: z.string().nullable(),
+  workingDirectory: z.string().nullable(),
 }).strict();
 export const agentListSchema = z.object({
   items: z.array(connectedAgentSchema),

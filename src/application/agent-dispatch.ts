@@ -2,14 +2,26 @@ import {Context, DateTime, Effect, Layer} from "effect";
 
 import type {ApplicationClock} from "./application-clock.js";
 import {
+  type ArtifactManagementFailure,
+  ArtifactManagementService,
+} from "./artifact-management.js";
+import {
   type AuthorizationOperations,
   AuthorizationService,
 } from "./authorization.js";
 import {parseIdempotencyKey} from "./idempotency-key.js";
+import {InstallationAccessService} from "./installation-access.js";
 import {
   type ProjectManagementFailure,
   ProjectManagementService,
 } from "./project-management.js";
+import {
+  agentArtifactScope,
+  agentCanReadArtifact,
+  agentLocationVisibleTo,
+  type AgentOwner,
+  agentReceivesWork,
+} from "../core/agent-reach.js";
 import {restrictedArtifactScope} from "../core/artifact-visibility.js";
 import {
   AgentDispatchNotFound,
@@ -18,6 +30,7 @@ import {
   AuthorizationDenied,
   type DispatchStateConflict,
   type IdempotencyConflict,
+  type IdentityRepositoryFailure,
   InvalidDispatch,
   type InvalidIdempotencyKey,
   InvalidPagination,
@@ -148,6 +161,13 @@ export interface ConnectedRegisteredAgent {
   readonly connected: boolean;
   /** max(lastSeenAt, latest dispatch transition). */
   readonly lastActivityAt: string;
+  /**
+   * Whether the reader may see where the agent runs: its working directory,
+   * connection key, and session id. False for another member's agent.
+   */
+  readonly locationVisible: boolean;
+  /** Who the agent acts for, which decides what it can read. */
+  readonly owner: AgentOwner;
 }
 
 /** Input for one self-naming agent registration upsert. */
@@ -168,8 +188,16 @@ export interface ReadAgentCommand {
   readonly principal: Principal;
 }
 
+/** The artifact a listing is for: only agents that can read it are listed. */
+export interface AgentListingArtifact {
+  readonly artifactId: string;
+  readonly projectId: string | null;
+}
+
 /** Input for listing the installation's registered agents. */
 export interface ListAgentsCommand {
+  /** Null lists every agent that can still claim work. */
+  readonly artifact: AgentListingArtifact | null;
   readonly principal: Principal;
 }
 
@@ -237,10 +265,12 @@ export interface ListDispatchesCommand {
 export type AgentDispatchFailure =
   | AgentDispatchNotFound
   | AgentNotFound
+  | ArtifactManagementFailure
   | ArtifactRepositoryFailure
   | AuthorizationDenied
   | DispatchStateConflict
   | IdempotencyConflict
+  | IdentityRepositoryFailure
   | InvalidDispatch
   | InvalidIdempotencyKey
   | InvalidPagination
@@ -293,22 +323,37 @@ export class AgentDispatchService extends Context.Service<
   ): Layer.Layer<
     AgentDispatchService,
     never,
-    AuthorizationService | ProjectManagementService
+    | ArtifactManagementService
+    | AuthorizationService
+    | InstallationAccessService
+    | ProjectManagementService
   > =>
     Layer.effect(
       AgentDispatchService,
       Effect.gen(function*() {
-        const authorization = yield* AuthorizationService;
-        const projects = yield* ProjectManagementService;
-        return makeAgentDispatchService(dependencies, authorization, projects);
+        return makeAgentDispatchService(dependencies, {
+          access: yield* InstallationAccessService,
+          artifacts: yield* ArtifactManagementService,
+          authorization: yield* AuthorizationService,
+          projects: yield* ProjectManagementService,
+        });
       }),
     );
 }
 
+/** Application services the dispatch operations consult. */
+interface AgentDispatchCollaborators {
+  /** Resolves who each agent acts for. */
+  readonly access: InstallationAccessService["Service"];
+  /** Reads the artifact a listing is for, as the reader. */
+  readonly artifacts: ArtifactManagementService["Service"];
+  readonly authorization: AuthorizationOperations;
+  readonly projects: ProjectManagementService["Service"];
+}
+
 function makeAgentDispatchService(
   dependencies: AgentDispatchDependencies,
-  authorization: AuthorizationOperations,
-  projects: ProjectManagementService["Service"],
+  {access, artifacts, authorization, projects}: AgentDispatchCollaborators,
 ): AgentDispatchOperations {
   const now = Effect.fn("AgentDispatchService.now")(function*() {
     return DateTime.formatIso(yield* dependencies.clock.now);
@@ -368,6 +413,18 @@ function makeAgentDispatchService(
       return yield* new AgentNotFound({
         message: "The registered agent does not exist.",
       });
+    },
+  );
+
+  /** Who one agent acts for; a principal without a member is a service. */
+  const resolveAgentOwner = Effect.fn("AgentDispatchService.resolveAgentOwner")(
+    function*(agent: RegisteredAgentRecord): Effect.fn.Return<
+      AgentOwner,
+      IdentityRepositoryFailure
+    > {
+      const owners = yield* access.resolveAgentOwners([agent.principalId]);
+      return owners.get(agent.principalId) ??
+        {kind: "service", principalId: agent.principalId};
     },
   );
 
@@ -513,15 +570,37 @@ function makeAgentDispatchService(
   const listAgents = Effect.fn("AgentDispatchService.listAgents")(
     function*(command: ListAgentsCommand) {
       yield* authorization.requireArtifactRead(command.principal);
+      // A reader who cannot see the artifact gets the artifact's not-found.
+      const artifact = command.artifact === null
+        ? null
+        : (yield* artifacts.getArtifact({
+          artifactId: command.artifact.artifactId,
+          principal: command.principal,
+          projectId: command.artifact.projectId,
+        })).artifact;
       const readTime = yield* now();
       const agents = yield* dependencies.repository.listAgents(
         dependencies.installationId,
         readTime,
       );
+      const owners = yield* access.resolveAgentOwners([
+        ...new Set(agents.map((presence) => presence.agent.principalId)),
+      ]);
       const readMilliseconds = Date.parse(readTime);
-      return agents.map((presence) =>
-        connectedAgent(presence, readMilliseconds)
-      );
+      return agents.flatMap((presence) => {
+        const owner = owners.get(presence.agent.principalId) ??
+          {kind: "service", principalId: presence.agent.principalId};
+        // A former member's agent can no longer claim, and an agent whose
+        // owner cannot read the artifact could not read what it is sent.
+        if (!agentReceivesWork(owner)) return [];
+        if (artifact !== null && !agentCanReadArtifact(owner, artifact)) return [];
+        return [connectedAgent(
+          presence,
+          readMilliseconds,
+          owner,
+          agentLocationVisibleTo(owner, command.principal.id),
+        )];
+      });
     },
   );
 
@@ -562,6 +641,13 @@ function makeAgentDispatchService(
       const note = yield* requireNote(command.note);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const agent = yield* requireAgent(command.agentId);
+      const owner = yield* resolveAgentOwner(agent);
+      // A former member's agent is gone from every listing and claims nothing.
+      if (!agentReceivesWork(owner)) {
+        return yield* new AgentNotFound({
+          message: "The registered agent does not exist.",
+        });
+      }
       return yield* dependencies.repository.createDispatch({
         agentDisplayName: agent.displayName,
         agentId: agent.id,
@@ -571,6 +657,7 @@ function makeAgentDispatchService(
         installationId: dependencies.installationId,
         note,
         projectId: project.id,
+        recipientScope: agentArtifactScope(owner),
         restrictedScope: restrictedArtifactScope(command.principal),
         sender: dispatchSender(command.principal),
         threadIds,
@@ -705,6 +792,8 @@ function makeAgentDispatchService(
 function connectedAgent(
   presence: RegisteredAgentPresence,
   readMilliseconds: number,
+  owner: AgentOwner,
+  locationVisible: boolean,
 ): ConnectedRegisteredAgent {
   const {activeDispatchId, agent, latestDispatchTransitionAt} = presence;
   const connected = Date.parse(agent.lastSeenAt) >=
@@ -726,7 +815,16 @@ function connectedAgent(
       Date.parse(latestDispatchTransitionAt) > Date.parse(agent.lastSeenAt)
     ? latestDispatchTransitionAt
     : agent.lastSeenAt;
-  return {activeDispatchId, activity, agent, beacon, connected, lastActivityAt};
+  return {
+    activeDispatchId,
+    activity,
+    agent,
+    beacon,
+    connected,
+    lastActivityAt,
+    locationVisible,
+    owner,
+  };
 }
 
 function dispatchSender(principal: Principal): CommentAuthor {

@@ -42,8 +42,8 @@ already polls (`GET /api/v1/agents`: `connected`, `activity`,
 | One | `Send all open (N) to ‹name›` with its presence avatar | Sends at once (PRS-004 rule: no dialog; undo toast). |
 | Several, default known | Split button: main part `Send all open (N) to ‹default›`; caret opens an inline menu of the others, each with its presence avatar | Main part sends to the default; picking from the menu makes that agent the default and sends. |
 | Several, no default yet | `Send all open (N)…`; the caret menu is the one-time prompt | Choosing sets the default and sends. |
-| Default disconnected | Disabled: `‹default› disconnected — pick another`; caret still open | Never falls through silently to a different agent. |
-| Target is mailbox tier (`evidence: "mailbox"`) | Enabled; label after send: `Queued for ‹name› — it picks this up when it next checks in.` | Sends; the tool-result nudges (NDG-001) make that promise real. |
+| Default disconnected (live tier) | Disabled: `‹default› disconnected — pick another`; caret still open | Never falls through silently to a different agent. |
+| Target is mailbox tier (`evidence: "mailbox"`) | Enabled, also when it has not checked in lately; label after send: `Queued for ‹name› — it picks this up when it next checks in.` | Sends; the tool-result nudges (NDG-001) make that promise real, and the queue waits for the next check ([ADR 0036](decisions/0036-mailbox-queue-and-agent-reach.md)). |
 
 The **default** is remembered per project (`localStorage`, key
 `dispatch-default:<principalId>:<projectId>`): the last agent sent to.

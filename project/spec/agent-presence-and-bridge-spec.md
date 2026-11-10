@@ -143,6 +143,11 @@ while live), tuned down to this app's zero-radius, quiet style:
   with the existing dispatch failure and the toast says the agent
   disconnected — the UI never silently queues into the void (the 15-minute
   `agent_unavailable` lazy failure remains the backstop).
+- A mailbox-tier agent is the exception, because its queue is the point: it
+  has no heartbeat, so it stays a destination while it is away, Review says
+  the send is delivered on its next check, and its queued dispatches wait
+  until it claims them or its registration is reaped
+  ([ADR 0036](decisions/0036-mailbox-queue-and-agent-reach.md)).
 
 ## 4. The reusable bridge protocol
 

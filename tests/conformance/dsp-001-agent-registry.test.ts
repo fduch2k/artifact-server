@@ -76,6 +76,7 @@ describe("registered agent registry", () => {
       beacon: null,
       connected: true,
       lastActivityAt: registered.lastSeenAt,
+      ownerDisplayName: null,
     }]);
 
     // Liveness is derived, not stored: the row stays listed and simply stops
@@ -91,6 +92,7 @@ describe("registered agent registry", () => {
       beacon: null,
       connected: false,
       lastActivityAt: registered.lastSeenAt,
+      ownerDisplayName: null,
     }]);
 
     // The claim poll is the heartbeat, so an empty poll restores liveness.
@@ -106,6 +108,7 @@ describe("registered agent registry", () => {
       beacon: null,
       connected: true,
       lastActivityAt: clock.now().toISOString(),
+      ownerDisplayName: null,
       lastSeenAt: clock.now().toISOString(),
     }]);
 
@@ -126,6 +129,7 @@ describe("registered agent registry", () => {
       beacon: null,
       connected: true,
       lastActivityAt: heartbeatStamp,
+      ownerDisplayName: null,
       lastSeenAt: heartbeatStamp,
     }]);
     expect((await heldPoll).status).toBe(204);
@@ -139,6 +143,7 @@ describe("registered agent registry", () => {
       beacon: null,
       connected: true,
       lastActivityAt: heartbeatStamp,
+      ownerDisplayName: null,
       lastSeenAt: heartbeatStamp,
     }]);
 
@@ -182,6 +187,7 @@ describe("registered agent registry", () => {
       beacon: null,
       connected: true,
       lastActivityAt: reRegistered.lastSeenAt,
+      ownerDisplayName: null,
     }]);
 
     const claimed = await agents.claim(registered.id);

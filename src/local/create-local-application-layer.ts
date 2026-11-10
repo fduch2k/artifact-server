@@ -1170,7 +1170,9 @@ export function createApplicationLayer(
     ),
   );
   const dispatchLayer = AgentDispatchService.layer(dispatchDependencies).pipe(
-    Layer.provideMerge(Layer.mergeAll(authorizationLayer, projectLayer)),
+    Layer.provideMerge(
+      Layer.mergeAll(authorizationLayer, identityLayer, managementLayer, projectLayer),
+    ),
   );
   const publicLinkAdministrationLayer = PublicLinkAdministrationService.layer(
     publicLinkAdministrationRepository,

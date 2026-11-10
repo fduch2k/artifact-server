@@ -3074,6 +3074,34 @@ requirements:
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-27T01:14:27.292Z"
 
+  - id: DSP-014
+    kind: behavior
+    behavior: A mailbox-tier agent is a queue. A send to it is accepted and stays queued however long ago it last checked in, until its next check claims it or its registration is reaped; live agents keep the 15-minute agent_unavailable failure, and Review keeps a waiting mailbox selectable and says the send is delivered on its next check.
+    owner: agent-dispatch
+    source: {file: decisions/0036-mailbox-queue-and-agent-reach.md, anchor: decision}
+    acceptance:
+      behavior: {id: DSP-014-B, description: "Send to a mailbox agent whose last check is past both the connected window and the 15-minute backstop, observe the dispatch still queued and its thread still away hours later, then claim and deliver it on the agent's next check, which reconnects the agent; in Review the remembered mailbox stays the enabled destination after its heartbeat lapses and the panel counts it as a mailbox, not offline."}
+      failure: {id: DSP-014-F, description: "A live agent's queued dispatch still fails agent_unavailable after 15 minutes and returns its thread, while the mailbox's waits; once the retention reaper removes the mailbox registration, its queued dispatch fails agent_unavailable and its thread returns to the default listing."}
+    deployments: *all
+    status: implementing
+    proof_gap: DSP-014-B and DSP-014-F run against the local SQLite server with a movable clock, and the Review half runs in the SND-002 Chromium test in local-owner mode. A Postgres case is in the external-storage runtime suite but has not been run on this machine (no Docker); its fork CI run is not recorded here. D1 shares the SQL and is exercised only for the listing shape, because the Worker test runs on the system clock.
+    depends_on: [DSP-001, DSP-009, BRP-002, SND-002]
+    evidence: []
+
+  - id: DSP-015
+    kind: security
+    behavior: The agent listing for an artifact holds only the agents whose owner can read it, a send is refused whole when the target agent cannot read the artifact of a thread in the bundle, a former member's agent is offered nowhere, and another member's agent keeps its working directory, connection key, and session private.
+    owner: agent-dispatch
+    source: {file: decisions/0036-mailbox-queue-and-agent-reach.md, anchor: decision}
+    acceptance:
+      behavior: {id: DSP-015-B, description: "For a restricted artifact shared with one member, the owner's listing holds the owner's and that member's agents, the member's agent with its location withheld and its owner named; an account-required artifact lists every member's agent and a service key's agent with its directory; the shared member's agent claims a thread sent from the restricted artifact and reads it; Review on a restricted artifact offers no agent a service key connected while the same agent is offered on an account-required one."}
+      failure: {id: DSP-015-F, description: "Sends to the agent of a member without access and to a service key's agent are refused with INVALID_DISPATCH, a bundle mixing a readable and an unreadable thread is refused whole and leaves both threads open and sendable, readers who cannot see the artifact get ARTIFACT_NOT_FOUND for its agent listing, and after deactivation a former member's agent leaves every listing and a send to it is AGENT_NOT_FOUND."}
+    deployments: *all
+    status: implementing
+    proof_gap: DSP-015-B and DSP-015-F run against the local SQLite server with administrator-issued member keys, and the Review half runs in Chromium in local-owner mode. The Postgres refusal is covered by an external-storage runtime case not run on this machine (no Docker); D1 shares the SQLite check but has no restricted-artifact dispatch test. Not checked live on devhub with a second member.
+    depends_on: [DSP-003, DSP-010, AUTH-033, AUTH-036]
+    evidence: []
+
   - id: BRP-001
     kind: behavior
     behavior: The extracted bridge core is host-agnostic. It drives a fake host through register, claim, deliver, reply, and resolve against a real server, and its module graph reaches no Pi code.
@@ -3248,10 +3276,10 @@ requirements:
     source: {file: send-all-spec.md, anchor: conformance-ids-reserved-ledger-entries-land-with-the-build}
     acceptance:
       behavior: {id: SND-002-B, description: "Send to one connected agent, choose and remember a project default from the multi-agent caret menu, and send to a mailbox-tier agent while the control and toast state the true destination and queue behavior."}
-      failure: {id: SND-002-F, description: "No connected agent, no open thread, and a present-but-disconnected remembered default disable the main action with their exact reasons; a missing remembered registration is forgotten, and a disconnected default never falls through to another connected agent."}
+      failure: {id: SND-002-F, description: "No connected agent, no open thread, and a present-but-disconnected remembered live default disable the main action with their exact reasons; a missing remembered registration is forgotten, and a disconnected default never falls through to another connected agent."}
     deployments: [local]
     status: behavior_verified
-    proof_gap: Local browser evidence uses one principal; it proves a disconnected default by aging a still-listed registration beyond the heartbeat window and separately proves that a deleted registration is forgotten. Other principals and deployments remain unrecorded.
+    proof_gap: Local browser evidence uses one principal; it proves a disconnected default by aging a still-listed registration beyond the heartbeat window and separately proves that a deleted registration is forgotten. Other principals and deployments remain unrecorded. Since ADR 0036 a remembered mailbox-tier default stays sendable after its heartbeat lapses and only a live default disables the control; the recorded evidence predates that change, and the fork's browser run that covers it is not recorded here.
     depends_on: [PRS-001, PRS-004, BRP-002, SND-001]
     evidence:
       - deployment: local

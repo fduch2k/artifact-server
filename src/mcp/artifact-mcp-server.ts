@@ -501,7 +501,7 @@ export function createArtifactMcpServer(
     const agents = await runMcpApplicationEffect(
       dependencies,
       AgentDispatchService.use((registry) =>
-        registry.listAgents({principal: identity.principal})
+        registry.listAgents({artifact: null, principal: identity.principal})
       ),
     );
     const own = agents.find((candidate) =>
@@ -1913,7 +1913,7 @@ export function createArtifactMcpServer(
     const agents = await runMcpApplicationEffect(
       dependencies,
       AgentDispatchService.use((registry) =>
-        registry.listAgents({principal: identity.principal})
+        registry.listAgents({artifact: null, principal: identity.principal})
       ),
     );
     const own = agents.find((candidate) =>

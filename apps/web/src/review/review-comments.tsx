@@ -36,6 +36,7 @@ import {
   dispatchIsCancelable,
   DispatchStateChip,
 } from "@/components/dispatch/dispatch-state";
+import {isWaitingMailbox} from "@/components/dispatch/agent-destination";
 import {useDispatchUndo} from "@/components/dispatch/dispatch-toast";
 import {PresenceAvatar} from "@/components/dispatch/presence-avatar";
 import {SendToAgentControl} from "@/components/dispatch/send-to-agent-dialog";
@@ -50,12 +51,16 @@ const conversationLoadConcurrency = 6;
 
 function agentPresenceSummary(agents: readonly AgentPresence[] | null): string {
   if (agents === null) return "Checking presence…";
+  if (agents.length === 0) return "No agents connected";
   const connectedCount = agents.filter((agent) => agent.connected).length;
-  const offlineCount = agents.length - connectedCount;
-  if (offlineCount === 0) {
-    return connectedCount === 0 ? "No agents connected" : `${connectedCount} connected`;
-  }
-  return `${connectedCount} connected · ${offlineCount} offline`;
+  // A mailbox that has not checked in lately still takes sends: not offline.
+  const mailboxCount = agents.filter(isWaitingMailbox).length;
+  const offlineCount = agents.length - connectedCount - mailboxCount;
+  return [
+    `${connectedCount} connected`,
+    ...(mailboxCount === 0 ? [] : [`${mailboxCount} mailbox`]),
+    ...(offlineCount === 0 ? [] : [`${offlineCount} offline`]),
+  ].join(" · ");
 }
 
 function threadQuery(
@@ -578,14 +583,21 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
   const [sentLoading, setSentLoading] = useState(false);
   const [sentError, setSentError] = useState<Error | null>(null);
 
+  const agentArtifact = useMemo(
+    () => session.artifactId === null || session.projectId === ""
+      ? null
+      : {artifactId: session.artifactId, projectId: session.projectId},
+    [session.artifactId, session.projectId],
+  );
   const loadAgents = useCallback(async (): Promise<void> => {
     try {
-      setAgents(await api.agentPresence());
+      // Only agents whose owner can read this artifact are destinations here.
+      setAgents(await api.agentPresence(agentArtifact ?? undefined));
       setAgentError(null);
     } catch (caught) {
       setAgentError(caught instanceof Error ? caught : new Error("Agent presence failed."));
     }
-  }, []);
+  }, [agentArtifact]);
 
   const loadSent = useCallback(async (): Promise<void> => {
     if (session.artifactId === null || session.projectId === "" || versionId === null) {
@@ -683,6 +695,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
         <div className="as-comments__send-all">
           <SendToAgentControl
             agents={agents}
+            artifact={agentArtifact}
             buttonSize="xs"
             buttonVariant="default"
             feedback={dispatchUndo.feedback}
@@ -798,6 +811,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                           {canComment && thread.state === "open" ? (
                             <SendToAgentControl
                               agents={agents}
+                              artifact={agentArtifact}
                               buttonSize="xs"
                               buttonVariant="outline"
                               feedback={dispatchUndo.feedback}

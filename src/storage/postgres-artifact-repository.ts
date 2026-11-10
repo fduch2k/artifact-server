@@ -140,6 +140,10 @@ import {
   storedAccessSetting,
 } from "./restricted-access-storage.js";
 import {
+  mailboxAgentSql,
+  recipientCannotReadMessage,
+} from "./agent-dispatch-storage.js";
+import {
   gitHistoryCopyPolicyDigest,
   gitHistoryJobId,
   gitHistoryJobKinds,
@@ -501,6 +505,7 @@ const agentDispatchRowSchema = z.object({
 const dispatchThreadCheckRowSchema = z.object({
   dispatchId: z.string().nullable(),
   id: z.string(),
+  recipientCanRead: z.boolean(),
   state: commentThreadStateSchema,
 });
 const dispatchIdentityRowSchema = z.object({id: z.string()});
@@ -3158,13 +3163,25 @@ export class PostgresArtifactRepository implements
         // sends can never double-book a thread and a rejected bundle leaves
         // no partial markers behind.
         for (const threadId of command.threadIds) {
-          // A thread of a restricted artifact the sender cannot see counts as missing.
+          // A thread of a restricted artifact the sender cannot see counts as
+          // missing; one the target agent's owner cannot see refuses the send.
           const [restrictedAll, restrictedOwner, restrictedGrantee] =
             restrictedScopeParameters(command.restrictedScope);
+          const [recipientAll, recipientOwner, recipientGrantee] =
+            restrictedScopeParameters(command.recipientScope);
           const checked = yield* sql`SELECT
               thread.id AS "id",
               thread.state AS "state",
-              thread.dispatch_id AS "dispatchId"
+              thread.dispatch_id AS "dispatchId",
+              -- An empty scope binds NULL ids; COALESCE turns unknown into no.
+              COALESCE(NOT artifact.restricted OR ${recipientAll}::int = 1
+                OR artifact.owner_principal_id = ${recipientOwner}::text
+                OR EXISTS (
+                  SELECT 1 FROM artifact_grants recipient_grant
+                  WHERE recipient_grant.installation_id = artifact.installation_id
+                    AND recipient_grant.artifact_id = artifact.id
+                    AND recipient_grant.principal_id = ${recipientGrantee}::text
+                ), false) AS "recipientCanRead"
             FROM comment_threads thread
             JOIN artifacts artifact
               ON artifact.installation_id = thread.installation_id
@@ -3199,6 +3216,11 @@ export class PostgresArtifactRepository implements
             return yield* new InvalidDispatch({
               message:
                 "The bundle references a comment thread that is already dispatched.",
+            });
+          }
+          if (!row.recipientCanRead) {
+            return yield* new InvalidDispatch({
+              message: recipientCannotReadMessage,
             });
           }
         }
@@ -4707,8 +4729,9 @@ export class PostgresArtifactRepository implements
 
   /**
    * The lazy transition set applied on the read path, in machine order:
-   * an expired claim lease returns to queued, a queued dispatch whose agent
-   * stopped polling fails as agent_unavailable, and a delivered dispatch
+   * an expired claim lease returns to queued, a queued dispatch whose live
+   * agent stopped polling (a mailbox agent's queue waits for its next check)
+   * fails as agent_unavailable, and a delivered dispatch
    * whose every bundle thread is resolved is stamped addressed once.
    */
   #applyLazyDispatchTransitions(
@@ -4736,7 +4759,8 @@ export class PostgresArtifactRepository implements
             SELECT 1 FROM registered_agents agent
             WHERE agent.installation_id = dispatch.installation_id
               AND agent.id = dispatch.agent_id
-              AND agent.last_seen_at >= ${staleBefore}
+              AND (agent.last_seen_at >= ${staleBefore}
+                OR ${sql.literal(mailboxAgentSql("agent", "postgres"))})
           )
         RETURNING dispatch.id`;
       if (failed.length === 1) {
@@ -4770,7 +4794,8 @@ export class PostgresArtifactRepository implements
             SELECT 1 FROM registered_agents agent
             WHERE agent.installation_id = dispatch.installation_id
               AND agent.id = dispatch.agent_id
-              AND agent.last_seen_at >= ${staleBefore}
+              AND (agent.last_seen_at >= ${staleBefore}
+                OR ${sql.literal(mailboxAgentSql("agent", "postgres"))})
           )`;
       for (const stale of z.array(dispatchIdentityRowSchema).parse(staleRows)) {
         yield* this.#failDispatch(stale.id, "agent_unavailable", now);
