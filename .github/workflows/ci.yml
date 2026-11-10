@@ -196,7 +196,10 @@ jobs:
 
   portable:
     name: macOS portability
-    if: inputs.tier != 'release'
+    # Skipped in the fduch2k fork: it ships a Linux image only, and GitHub's
+    # macOS arm64 capacity left this job unassigned for hours (November 2026),
+    # holding back the image. Drop the repository clause to run it again.
+    if: inputs.tier != 'release' && github.repository != 'fduch2k/artifact-server'
     runs-on: macos-15
     timeout-minutes: 12
     steps:
