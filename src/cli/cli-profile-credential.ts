@@ -52,6 +52,7 @@ const principalSchema = Schema.Struct({
   capabilities: Schema.Array(Schema.Literals([
     principalCapabilities.connectAgents,
     principalCapabilities.createArtifact,
+    principalCapabilities.dispatchToAgents,
     principalCapabilities.issueContentSession,
     principalCapabilities.manageAnyArtifact,
     principalCapabilities.manageOwnArtifact,

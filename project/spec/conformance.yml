@@ -1841,6 +1841,20 @@ requirements:
     depends_on: [AUTH-002, AUTH-014, AUTH-015, AUTH-019, AUTH-026]
     evidence: []
 
+  - id: AUTH-039
+    kind: security
+    behavior: A key holding agent:dispatch sends dispatches with its principal's reach and cancels only the dispatches its principal sent; without the capability a key cannot send or cancel, and the capability does not reach bulk comment clearing.
+    owner: authorization
+    source: {file: decisions/0037-keys-send-dispatches.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-039-B, description: "A member's personal key holding agent:dispatch sends a thread of the member's restricted artifact and of a colleague's restricted artifact shared with the member, recorded with the member as sender, and cancels both its own send and one the member made from the browser; a service key an administrator gave only agent:dispatch sends and cancels a thread of an account-required artifact as itself."}
+      failure: {id: AUTH-039-F, description: "The member's key issued without agent:dispatch cannot send or cancel; with it, a thread of a colleague's restricted artifact not shared with the member is refused as missing, a colleague's dispatch cannot be canceled and stays queued, and bulk comment clearing is refused; a service key with the capability is refused a thread of a restricted artifact."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-039-B and AUTH-039-F run against the local SQLite server through a stub OIDC provider; the rule lives in the backend-independent application layer, and Postgres and D1 only parse the new capability name. The personal-key dialog's unselected default is checked by the AUTH-034 browser test; the administrator dialog is not driven in a browser. No deployment-specific evidence is recorded.
+    depends_on: [DSP-010, AUTH-034, AUTH-036, DSP-015]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.
@@ -3003,7 +3017,7 @@ requirements:
 
   - id: DSP-010
     kind: security
-    behavior: Sending and canceling a dispatch require a direct human member or a principal that can manage any artifact, and every dispatch operation is project-scoped.
+    behavior: Sending and canceling a dispatch require a direct human member, a principal that can manage any artifact, or a key holding agent:dispatch (AUTH-039), and every dispatch operation is project-scoped.
     owner: agent-dispatch
     source: {file: agent-dispatch-spec.md, anchor: conformance-and-testing}
     acceptance:

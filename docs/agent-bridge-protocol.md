@@ -24,7 +24,7 @@ One send is one bundle is one dispatch is one message to the host. Bundles are n
 
 A bridge needs two values: the installation origin and an API key that holds the `agent:connect` capability. A service key works, and so does a key bound to a member, including a member's personal key; the member's agents then belong to that member. Send the token as `Authorization: Bearer <token>` on every request.
 
-Register, claim, report, disconnect, and the beacon require `agent:connect`. Direct human sessions are not agents and are refused. Sending and canceling a dispatch are human actions and are never available to an agent token.
+Register, claim, report, disconnect, and the beacon require `agent:connect`. Direct human sessions are not agents and are refused. `agent:connect` never sends or cancels a dispatch: that takes a person in Review, a key holding `artifact:manage:any`, or a key holding `agent:dispatch`, which cancels only its own principal's sends (ADR 0037).
 
 Agent rows are scoped to the registering principal. Another principal presenting the same connection key registers its own separate agent and can never reclaim this one or its queue. Acting on an agent that belongs to another principal answers `404 AGENT_NOT_FOUND` with no disclosure.
 

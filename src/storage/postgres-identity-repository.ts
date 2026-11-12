@@ -44,6 +44,7 @@ const principalKindSchema = z.enum([
 const principalCapabilitySchema = z.enum([
   principalCapabilities.connectAgents,
   principalCapabilities.createArtifact,
+  principalCapabilities.dispatchToAgents,
   principalCapabilities.issueContentSession,
   principalCapabilities.manageAnyArtifact,
   principalCapabilities.manageOwnArtifact,

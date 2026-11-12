@@ -35,8 +35,11 @@ test.describe("Personal API keys in settings", () => {
       await fixture.page.getByRole("button", {name: "Issue personal key"}).click();
       const dialog = fixture.page.getByRole("dialog", {name: "Issue personal key"});
       await expect(dialog).toContainText("expires within 45 days");
-      // Every capability of the ceiling starts selected; nothing reaches others' work.
-      await expect(dialog.getByRole("checkbox")).toHaveCount(7);
+      // The ceiling starts selected except sending to agents, which is chosen
+      // on purpose; nothing reaches others' work.
+      await expect(dialog.getByRole("checkbox")).toHaveCount(8);
+      await expect(dialog.getByRole("checkbox", {checked: true})).toHaveCount(7);
+      await expect(dialog.getByRole("checkbox", {name: /Send to agents/u})).not.toBeChecked();
       await expect(dialog.getByText("Manage artifacts", {exact: true})).toHaveCount(0);
       await expect(dialog.getByRole("button", {name: "Issue personal key"})).toBeDisabled();
       await dialog.getByLabel("Name").fill("Laptop agent");
@@ -69,6 +72,7 @@ test.describe("Personal API keys in settings", () => {
       const listed = fixture.page.getByRole("article").filter({hasText: "Laptop agent"});
       await expect(listed).toContainText("Active");
       await expect(listed).toContainText("artifact:manage:own");
+      await expect(listed).not.toContainText("agent:dispatch");
       await listed.getByRole("button", {name: "Revoke"}).click();
       await fixture.page.getByRole("dialog", {name: "Revoke API key"})
         .getByRole("button", {name: "Revoke API key"}).click();

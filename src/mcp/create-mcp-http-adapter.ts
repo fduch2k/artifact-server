@@ -36,6 +36,7 @@ const principalSchema = z.object({
   capabilities: z.array(z.enum([
     principalCapabilities.connectAgents,
     principalCapabilities.createArtifact,
+    principalCapabilities.dispatchToAgents,
     principalCapabilities.issueContentSession,
     principalCapabilities.manageAnyArtifact,
     principalCapabilities.manageOwnArtifact,

@@ -27,6 +27,13 @@ export interface AuthorizationOperations {
   readonly requireDispatchSend: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
+  readonly requireDispatchCancel: (
+    principal: Principal,
+    senderPrincipalId: string,
+  ) => Effect.Effect<void, AuthorizationDenied>;
+  readonly requireCommentClear: (
+    principal: Principal,
+  ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireInstallationAdministration: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
@@ -122,15 +129,48 @@ function makeAuthorizationService(
     yield* denied();
   });
 
-  // Sending and canceling dispatches stays a human decision in v1; the only
-  // service exception is the artifact-management capability.
+  // A person sends from Review; a key sends only when it was given
+  // agent:dispatch, or holds the artifact-management capability that always
+  // could (ADR 0037).
   const requireDispatchSend = Effect.fn(
     "AuthorizationService.requireDispatchSend",
   )(function*(principal: Principal) {
     yield* requireInstallation(principal);
     if (
       isDirectHumanPrincipal(principal) ||
+      hasCapability(principal, principalCapabilities.manageAnyArtifact) ||
+      hasCapability(principal, principalCapabilities.dispatchToAgents)
+    ) {
+      return;
+    }
+    yield* denied();
+  });
+
+  // Clearing an artifact's threads in bulk stays with a person or a key that
+  // manages any artifact; agent:dispatch does not reach it.
+  const requireCommentClear = Effect.fn(
+    "AuthorizationService.requireCommentClear",
+  )(function*(principal: Principal) {
+    yield* requireInstallation(principal);
+    if (
+      isDirectHumanPrincipal(principal) ||
       hasCapability(principal, principalCapabilities.manageAnyArtifact)
+    ) {
+      return;
+    }
+    yield* denied();
+  });
+
+  // A person and a manage-any key cancel any dispatch in the project; a key
+  // that sends through agent:dispatch cancels only what its principal sent.
+  const requireDispatchCancel = Effect.fn(
+    "AuthorizationService.requireDispatchCancel",
+  )(function*(principal: Principal, senderPrincipalId: string) {
+    yield* requireDispatchSend(principal);
+    if (
+      isDirectHumanPrincipal(principal) ||
+      hasCapability(principal, principalCapabilities.manageAnyArtifact) ||
+      principal.id === senderPrincipalId
     ) {
       return;
     }
@@ -252,6 +292,7 @@ function makeAuthorizationService(
     if (
       isDirectHumanPrincipal(principal) ||
       hasCapability(principal, principalCapabilities.createArtifact) ||
+      hasCapability(principal, principalCapabilities.dispatchToAgents) ||
       hasCapability(principal, principalCapabilities.issueContentSession) ||
       hasCapability(principal, principalCapabilities.manageAnyArtifact) ||
       hasCapability(principal, principalCapabilities.manageOwnArtifact) ||
@@ -296,6 +337,8 @@ function makeAuthorizationService(
 
   return AuthorizationService.of({
     requireAgentConnection,
+    requireCommentClear,
+    requireDispatchCancel,
     requireDispatchSend,
     requireInstallationAdministration,
     requireArtifactListing,

@@ -722,6 +722,10 @@ function makeAgentDispatchService(
         command.dispatchId,
         canceledAt,
       );
+      yield* authorization.requireDispatchCancel(
+        command.principal,
+        dispatch.sender.principalId,
+      );
       return yield* dependencies.repository.cancelDispatch({
         canceledAt,
         dispatchId: dispatch.id,

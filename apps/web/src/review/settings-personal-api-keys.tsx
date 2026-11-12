@@ -31,16 +31,23 @@ const expirationSafetyMilliseconds = 5 * 60 * 1_000;
 const personalCapabilities: readonly {
   readonly description: string;
   readonly label: string;
+  /** Sending threads to agents is chosen on purpose, not by default. */
+  readonly startsSelected: boolean;
   readonly value: PrincipalCapability;
 }[] = [
-  { description: "List and read artifact metadata.", label: "Read artifacts", value: "artifact:read" },
-  { description: "Create new artifacts, owned by you.", label: "Create artifacts", value: "artifact:create" },
-  { description: "Publish new versions of your own artifacts.", label: "Publish your versions", value: "artifact:publish:own" },
-  { description: "Restore, tag, change access of, or delete your own artifacts.", label: "Manage your artifacts", value: "artifact:manage:own" },
-  { description: "Open account-required artifact content.", label: "Issue content sessions", value: "content-session:issue" },
-  { description: "Read, reply to, and resolve review comments.", label: "Manage comments", value: "comment:write" },
-  { description: "Register your coding agent and claim the annotations sent to it.", label: "Connect your agent", value: "agent:connect" },
+  { description: "List and read artifact metadata.", label: "Read artifacts", startsSelected: true, value: "artifact:read" },
+  { description: "Create new artifacts, owned by you.", label: "Create artifacts", startsSelected: true, value: "artifact:create" },
+  { description: "Publish new versions of your own artifacts.", label: "Publish your versions", startsSelected: true, value: "artifact:publish:own" },
+  { description: "Restore, tag, change access of, or delete your own artifacts.", label: "Manage your artifacts", startsSelected: true, value: "artifact:manage:own" },
+  { description: "Open account-required artifact content.", label: "Issue content sessions", startsSelected: true, value: "content-session:issue" },
+  { description: "Read, reply to, and resolve review comments.", label: "Manage comments", startsSelected: true, value: "comment:write" },
+  { description: "Register your coding agent and claim the annotations sent to it.", label: "Connect your agent", startsSelected: true, value: "agent:connect" },
+  { description: "Send review threads to agents, as you do from Review, and cancel what you sent.", label: "Send to agents", startsSelected: false, value: "agent:dispatch" },
 ];
+
+const initialPersonalCapabilities: readonly PrincipalCapability[] = personalCapabilities
+  .filter(({startsSelected}) => startsSelected)
+  .map(({value}) => value);
 
 /** Keys that act as the signed-in member, and self-service issuance when enabled. */
 export function PersonalApiKeysScreen({
@@ -61,7 +68,7 @@ export function PersonalApiKeysScreen({
   const [expiration, setExpiration] = useState("");
   const [selectedCapabilities, setSelectedCapabilities] = useState<
     readonly PrincipalCapability[]
-  >(personalCapabilities.map(({value}) => value));
+  >(initialPersonalCapabilities);
 
   const load = async () => {
     setLoading(true);
@@ -109,7 +116,7 @@ export function PersonalApiKeysScreen({
       setIssued(result);
       setName("");
       setExpiration("");
-      setSelectedCapabilities(personalCapabilities.map(({value}) => value));
+      setSelectedCapabilities(initialPersonalCapabilities);
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught : new Error("API key issuance failed."));

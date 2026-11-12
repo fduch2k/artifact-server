@@ -38,6 +38,7 @@ const capabilities: readonly {
   { description: "Open account-required artifact content.", label: "Issue content sessions", value: "content-session:issue" },
   { description: "Create, rename, archive, and unarchive projects.", label: "Manage projects", value: "project:manage" },
   { description: "Register a coding agent and claim dispatched annotations.", label: "Connect agents", value: "agent:connect" },
+  { description: "Send review threads to agents and cancel only its own sends. A member key acts as that member and reaches what the member can read.", label: "Send to agents", value: "agent:dispatch" },
   { description: "Read, reply to, and resolve review comments.", label: "Manage comments", value: "comment:write" },
 ];
 

@@ -6,6 +6,7 @@ const principalKindSchema = z.enum(["human", "service"]);
 const capabilitySchema = z.enum([
   "agent:connect",
   "artifact:create",
+  "agent:dispatch",
   "comment:write",
   "content-session:issue",
   "artifact:manage:any",
