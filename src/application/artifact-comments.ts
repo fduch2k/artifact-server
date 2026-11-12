@@ -697,9 +697,9 @@ function makeArtifactCommentService(
         command.principal,
         command.projectId,
       );
-      // Bulk clear shares the dispatch-send rule: a direct human member, or
-      // the artifact-management capability (spec §2).
-      yield* authorization.requireDispatchSend(command.principal);
+      // Bulk clear: a direct human member, or the artifact-management
+      // capability (spec §2).
+      yield* authorization.requireCommentClear(command.principal);
       const artifact = yield* requireArtifact(command.principal, project.id, command.artifactId);
       // Clearing everyone's threads is the owner's call on a restricted artifact.
       yield* requireArtifactChangeable(command.principal, artifact);

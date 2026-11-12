@@ -22,6 +22,7 @@ export type MembershipRole =
 export const principalCapabilities = {
   connectAgents: "agent:connect",
   createArtifact: "artifact:create",
+  dispatchToAgents: "agent:dispatch",
   issueContentSession: "content-session:issue",
   manageAnyArtifact: "artifact:manage:any",
   manageOwnArtifact: "artifact:manage:own",
@@ -44,12 +45,14 @@ export const ownerScopedCapabilities: readonly PrincipalCapability[] = [
 
 /**
  * The most a member may grant a personal API key: everything a person does
- * with their own artifacts and their own agent, nothing that reaches another
- * member's.
+ * with their own artifacts and their own agent, and sending threads to agents
+ * as the member does from Review; nothing that changes another member's
+ * artifacts.
  */
 export const personalApiKeyCapabilities: readonly PrincipalCapability[] = [
   principalCapabilities.connectAgents,
   principalCapabilities.createArtifact,
+  principalCapabilities.dispatchToAgents,
   principalCapabilities.issueContentSession,
   principalCapabilities.manageOwnArtifact,
   principalCapabilities.publishOwnArtifact,
