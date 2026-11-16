@@ -773,6 +773,11 @@ export function createHttpApp(
       "static-asset",
     ));
 
+  // review.html and review-frame.html link /favicon.svg from the web build's
+  // public directory; without this route the browser got a JSON 404.
+  app.on(["GET", "HEAD"], "/favicon.svg", (context) =>
+    serveWebAsset(context, dependencies, "/favicon.svg", "favicon"));
+
   app.on(
     ["GET", "HEAD"],
     "/review-frame",
@@ -4449,7 +4454,7 @@ function reviewFrameContentSecurityPolicy(contentDomain: string): string {
   ].join("; ");
 }
 
-type WebAssetKind = "application-shell" | "review-frame" | "static-asset";
+type WebAssetKind = "application-shell" | "favicon" | "review-frame" | "static-asset";
 
 async function serveWebAsset(
   context: Context<HttpEnvironment>,
