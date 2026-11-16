@@ -65,6 +65,8 @@ const gitHistoryCapabilitySchema = z.object({
 const deploymentCapabilitiesSchema = z.object({
   gitHistory: gitHistoryCapabilitySchema.default(disabledGitHistoryCapability),
   linkedArtifacts: z.boolean(),
+  /** A person's session manages only the artifacts they own (ADR 0038). */
+  ownerScopedManagement: z.boolean().default(false),
   /** Members may issue their own owner-scoped API keys up to this lifetime. */
   personalApiKeys: z.object({
     maxLifetimeDays: z.number().int().positive(),
@@ -72,6 +74,7 @@ const deploymentCapabilitiesSchema = z.object({
 }).default({
   gitHistory: disabledGitHistoryCapability,
   linkedArtifacts: false,
+  ownerScopedManagement: false,
   personalApiKeys: null,
 });
 

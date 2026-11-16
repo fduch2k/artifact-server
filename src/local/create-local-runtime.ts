@@ -93,6 +93,8 @@ export interface LocalRuntimeConfig {
   readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
   /** Use keeps a browser session alive for this idle window; absent keeps fixed sessions. */
   readonly slidingSessionPolicy?: SlidingSessionPolicy;
+  /** A person's session manages only artifacts they own (ADR 0038); absent keeps AUTH-008. */
+  readonly ownerScopedManagement?: boolean;
   readonly browserAccess: BrowserAccess;
   readonly clock?: Clock;
   readonly completedRequestLogSampleRate?: number;
@@ -258,6 +260,9 @@ export async function createLocalRuntime(
   if (config.slidingSessionPolicy !== undefined) {
     Object.assign(applicationAdapters, {slidingSessionPolicy: config.slidingSessionPolicy});
   }
+  if (config.ownerScopedManagement !== undefined) {
+    Object.assign(applicationAdapters, {ownerScopedManagement: config.ownerScopedManagement});
+  }
   if (gitHistoryProvider !== null) {
     Object.assign(applicationAdapters, {gitHistoryProvider});
   }
@@ -315,6 +320,7 @@ export async function createLocalRuntime(
       gitHistory: gitHistoryMonitor?.reader ??
         fixedGitHistoryCapabilityReader(gitHistory.capability),
       linkedArtifacts: linkedFilesEnabled,
+      ownerScopedManagement: config.ownerScopedManagement === true,
       personalApiKeyPolicy: config.personalApiKeyPolicy ?? null,
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),

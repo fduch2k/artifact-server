@@ -701,8 +701,10 @@ function makeArtifactCommentService(
       // capability (spec §2).
       yield* authorization.requireCommentClear(command.principal);
       const artifact = yield* requireArtifact(command.principal, project.id, command.artifactId);
-      // Clearing everyone's threads is the owner's call on a restricted artifact.
+      // Clearing everyone's threads is the owner's call on a restricted artifact,
+      // and on any artifact under owner-scoped management (ADR 0038).
       yield* requireArtifactChangeable(command.principal, artifact);
+      yield* authorization.requireCommentClearOnArtifact(command.principal, artifact);
       if (command.versionId !== null) {
         yield* requireVersion(project.id, artifact.id, command.versionId);
       }

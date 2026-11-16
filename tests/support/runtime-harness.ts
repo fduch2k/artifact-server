@@ -108,6 +108,7 @@ export async function startTestServer(
     readonly linkRoots?: readonly string[];
     readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
     readonly observability?: boolean;
+    readonly ownerScopedManagement?: boolean;
     readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
     readonly port?: number;
     readonly slidingSessionPolicy?: SlidingSessionPolicy;
@@ -194,6 +195,9 @@ export async function startTestServer(
   }
   if (options.mcpOAuthResource !== undefined) {
     config = {...config, mcpOAuthResource: options.mcpOAuthResource};
+  }
+  if (options.ownerScopedManagement !== undefined) {
+    config = {...config, ownerScopedManagement: options.ownerScopedManagement};
   }
   if (options.personalApiKeyPolicy !== undefined) {
     config = {...config, personalApiKeyPolicy: options.personalApiKeyPolicy};

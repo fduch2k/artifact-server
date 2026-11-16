@@ -968,6 +968,16 @@ function ArtifactReview({
     )
     || session.principal.capabilities.includes("artifact:manage:any")
   );
+  // Owner-scoped management (ADR 0038) narrows a person's own session to the
+  // artifacts they own; administrators and manage-any keys keep the project rule.
+  const sessionIsOwnerScoped = session.capabilities.ownerScopedManagement
+    && session.principal.kind === "human"
+    && session.principal.authorizedByPrincipalId === null
+    && session.principal.membershipRole !== "administrator";
+  const canManageSelectedArtifact = canManageArtifacts && (
+    !sessionIsOwnerScoped
+    || details?.artifact.ownerPrincipalId === session.principal.id
+  );
   const canDeleteAnyComment = (
     session.principal.kind === "human"
     && session.principal.authorizedByPrincipalId === null
@@ -1669,6 +1679,7 @@ function ArtifactReview({
                     <span className="as-focus-controls__count">{openCommentCount}</span>
                   </button>
                   <ReviewShareControl
+                    canManageAccess={canManageSelectedArtifact}
                     details={details}
                     key={`focus-share-${details?.artifact.id ?? "empty"}`}
                     onArtifactChanged={updateArtifact}
@@ -1789,6 +1800,7 @@ function ArtifactReview({
                 </span>
               </button>
               <ReviewShareControl
+                canManageAccess={canManageSelectedArtifact}
                 details={details}
                 key={`header-share-${details?.artifact.id ?? "empty"}`}
                 onArtifactChanged={updateArtifact}
@@ -1994,7 +2006,7 @@ function ArtifactReview({
               <InlineState description="Select an artifact to inspect its immutable record." title="Nothing selected" />
             ) : inspectorTab === "details" ? (
               <DetailsInspector
-                canManage={canManageArtifacts}
+                canManage={canManageSelectedArtifact}
                 details={details}
                 linkedArtifacts={session.capabilities.linkedArtifacts}
                 onCapture={captureLinkedArtifact}
@@ -2020,7 +2032,7 @@ function ArtifactReview({
               />
             ) : inspectorTab === "versions" ? (
               <VersionsInspector
-                canManage={canManageArtifacts}
+                canManage={canManageSelectedArtifact}
                 comparisonLoading={comparisonLoading}
                 currentVersionId={details.artifact.currentVersionId}
                 onCompare={compareVersions}

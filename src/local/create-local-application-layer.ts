@@ -154,6 +154,8 @@ export interface ApplicationAdapters {
   readonly externalIdentityAdmissionPolicy?: ExternalIdentityAdmissionPolicy;
   readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
   readonly slidingSessionPolicy?: SlidingSessionPolicy;
+  /** A person's session manages only artifacts they own (ADR 0038); absent keeps AUTH-008. */
+  readonly ownerScopedManagement?: boolean;
   readonly clock: Clock;
   readonly externalApiBearerVerifier: BearerCredentialVerifier | null;
   readonly externalMcpBearerVerifier: BearerCredentialVerifier | null;
@@ -1050,6 +1052,7 @@ export function createApplicationLayer(
   }).pipe(Layer.provideMerge(identityLayer));
   const authorizationLayer = AuthorizationService.layer({
     installationId: adapters.installationId,
+    ownerScopedManagement: adapters.ownerScopedManagement === true,
   });
   const projectLayer = ProjectManagementService.layer(projectDependencies).pipe(
     Layer.provideMerge(authorizationLayer),

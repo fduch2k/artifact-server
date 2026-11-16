@@ -46,6 +46,8 @@ type CopiedTarget =
 const copiedResetMilliseconds = 1_600;
 
 interface ReviewShareControlProps {
+  /** False when owner-scoped management (ADR 0038) keeps this artifact's access with its owner. */
+  readonly canManageAccess: boolean;
   readonly details: ArtifactDetails | null;
   readonly onArtifactChanged: (artifact: ArtifactDetails["artifact"]) => void;
   readonly selectedPath: string | null;
@@ -55,6 +57,7 @@ interface ReviewShareControlProps {
 
 /** Share one artifact from either the standard viewer header or focus controls. */
 export function ReviewShareControl({
+  canManageAccess,
   details,
   onArtifactChanged,
   selectedPath,
@@ -337,8 +340,11 @@ export function ReviewShareControl({
                   </p>
                   <button
                     className="as-button"
-                    disabled={details === null}
+                    disabled={details === null || !canManageAccess}
                     onClick={openAccess}
+                    title={canManageAccess
+                      ? undefined
+                      : "Only the owner and administrators can change access."}
                     type="button"
                   >
                     Manage access
