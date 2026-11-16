@@ -773,10 +773,13 @@ export function createHttpApp(
       "static-asset",
     ));
 
-  // review.html and review-frame.html link /favicon.svg from the web build's
-  // public directory; without this route the browser got a JSON 404.
-  app.on(["GET", "HEAD"], "/favicon.svg", (context) =>
-    serveWebAsset(context, dependencies, "/favicon.svg", "favicon"));
+  // review.html and review-frame.html link these icons from the web build's
+  // public directory: SVG for most browsers, ICO for Safari, which skips SVG
+  // icons, and the touch icon for Safari bookmarks and iOS home screens.
+  for (const iconPath of ["/favicon.svg", "/favicon.ico", "/apple-touch-icon.png"]) {
+    app.on(["GET", "HEAD"], iconPath, (context) =>
+      serveWebAsset(context, dependencies, iconPath, "favicon"));
+  }
 
   app.on(
     ["GET", "HEAD"],

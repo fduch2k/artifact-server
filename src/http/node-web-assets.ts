@@ -76,6 +76,8 @@ function assetMediaType(relativePath: string): string {
   switch (path.extname(relativePath)) {
     case ".css":
       return "text/css; charset=utf-8";
+    case ".ico":
+      return "image/x-icon";
     case ".html":
       return "text/html; charset=utf-8";
     case ".js":
