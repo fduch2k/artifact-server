@@ -19,6 +19,8 @@ import {parsePersonalApiKeyPolicy} from
   "../identity/personal-api-key-policy.js";
 import {parseSlidingSessionPolicy} from
   "../identity/sliding-session-policy.js";
+import {parseOwnerScopedManagement} from
+  "../identity/owner-scoped-management-policy.js";
 import {createOidcIdentityProvider} from
   "../identity/oidc-identity-provider.js";
 import {createWorkOsHostedAuthentication} from
@@ -364,6 +366,9 @@ function configureExternalStorageStart(
       if (slidingSessionPolicy !== null) {
         serverConfig = {...serverConfig, slidingSessionPolicy};
       }
+      if (ownerScopedManagementFrom(process.env)) {
+        serverConfig = {...serverConfig, ownerScopedManagement: true};
+      }
       const server = await startExternalStorageServer(serverConfig);
       const displayHostname = options.host === "0.0.0.0"
         ? "localhost"
@@ -444,7 +449,16 @@ async function startCompactServer(
   if (slidingSessionPolicy !== null) {
     serverConfig = {...serverConfig, slidingSessionPolicy};
   }
+  if (ownerScopedManagementFrom(process.env)) {
+    serverConfig = {...serverConfig, ownerScopedManagement: true};
+  }
   return startLocalServer(serverConfig);
+}
+
+function ownerScopedManagementFrom(environment: NodeJS.ProcessEnv): boolean {
+  return parseOwnerScopedManagement(
+    environment["ARTIFACT_SERVER_OWNER_SCOPED_MANAGEMENT"],
+  );
 }
 
 function slidingSessionPolicyFrom(

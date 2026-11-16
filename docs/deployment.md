@@ -109,6 +109,25 @@ setting changes keep their stored expiry and start sliding on their next use.
 The setting applies to compact Compose, external-storage Compose, and the
 Cloudflare Worker; the Helm chart does not render it yet.
 
+### Let only owners manage their artifacts
+
+By default every signed-in member can, from the browser, publish to, restore,
+retag, change the access of, delete, read the history of, and bulk-clear the
+threads of any artifact they can see that is not restricted. Personal keys are
+already limited to their member's own artifacts; people are not. Set
+`ARTIFACT_SERVER_OWNER_SCOPED_MANAGEMENT=true` to give people the same limit:
+each of those actions then belongs to the artifact's owner and the
+installation's administrators. Other members keep reading, comparing,
+commenting, resolving threads, and sending threads to agents. An artifact that
+no member owns, such as one published by a service key, is managed by
+administrators only. Review hides the controls a person cannot use, and the
+server refuses them with `403 AUTHORIZATION_DENIED` either way.
+
+The switch accepts exactly `true` or `false` and defaults to `false`; any other
+value fails startup. It applies to compact Compose, external-storage Compose, and
+the Cloudflare Worker; the Helm chart does not render it yet. See
+[ADR 0038](../project/spec/decisions/0038-owner-scoped-member-management.md).
+
 ### Use a generic OIDC issuer for MCP
 
 The issuer configured for browser login also protects `/mcp`. Agents present an

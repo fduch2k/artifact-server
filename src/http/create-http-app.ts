@@ -507,6 +507,11 @@ export interface HttpAppDependencies {
   readonly linkedArtifacts?: boolean;
   readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
   /**
+   * Advertises owner-scoped management for people (ADR 0038). The
+   * authorization service enforces it; this only lets Review hide controls.
+   */
+  readonly ownerScopedManagement?: boolean;
+  /**
    * Advertises member self-service personal API keys. The application service
    * enforces the policy; this only shapes discovery for the settings screen.
    */
@@ -1051,6 +1056,7 @@ export function createHttpApp(
       capabilities: {
         gitHistory: gitHistory.read(),
         linkedArtifacts: dependencies.linkedArtifacts === true,
+        ownerScopedManagement: dependencies.ownerScopedManagement === true,
         personalApiKeys: dependencies.personalApiKeyPolicy ?? null,
       },
       principal: context.get("principal"),

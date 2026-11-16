@@ -1373,7 +1373,7 @@ requirements:
 
   - id: AUTH-008
     kind: security
-    behavior: Every admitted human member can manage artifacts in the installation's projects, except restricted artifacts, which only their owner and administrators manage (AUTH-031); service principals act only within explicit capabilities.
+    behavior: Every admitted human member can manage artifacts in the installation's projects, except restricted artifacts, which only their owner and administrators manage (AUTH-031), and except every artifact on an installation that turns on owner-scoped management (AUTH-040); service principals act only within explicit capabilities.
     owner: authorization
     source: {file: artifact-server-product-spec.html, anchor: sharing}
     acceptance:
@@ -1853,6 +1853,20 @@ requirements:
     status: implementing
     proof_gap: AUTH-039-B and AUTH-039-F run against the local SQLite server through a stub OIDC provider; the rule lives in the backend-independent application layer, and Postgres and D1 only parse the new capability name. The personal-key dialog's unselected default is checked by the AUTH-034 browser test; the administrator dialog is not driven in a browser. No deployment-specific evidence is recorded.
     depends_on: [DSP-010, AUTH-034, AUTH-036, DSP-015]
+    evidence: []
+
+  - id: AUTH-040
+    kind: security
+    behavior: With owner-scoped management on, a person's own session publishes to, restores, tags, changes access of, deletes, reads the history of, and bulk-clears the threads of only artifacts that person owns; administrators manage every artifact; other members keep reading, commenting, and resolving; with the setting off AUTH-008 is unchanged.
+    owner: authorization
+    source: {file: decisions/0038-owner-scoped-member-management.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-040-B, description: "With the setting on, the session reports it; the owner's browser session tags, opens to a public link, reads the history of, bulk-clears, restores, and deletes their own artifact; an administrator's session tags and deletes a colleague's; a colleague reads, comments on, and resolves threads of it; at the policy, the owner and administrators publish versions and clear threads, and a member key keeps its owner-scoped capability."}
+      failure: {id: AUTH-040-F, description: "With the setting on, a colleague's browser session is refused tagging, access changes, restore, deletion, the action history, and bulk clearing of another member's artifact with AUTHORIZATION_DENIED, and the artifact is unchanged; an artifact no member owns is refused to a member and allowed to an administrator; at the policy a colleague cannot publish a version or clear threads; with the setting off the same colleague manages (AUTH-008); the setting accepts only true or false."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-040-B and AUTH-040-F run against the local SQLite server through a stub OIDC provider and against the authorization policy; the rule lives in the backend-independent application layer and needs no storage change. Publishing a version from a browser session is proved at the policy, not over HTTP. The Review controls hidden for a colleague's artifact are not driven in a browser. No deployment-specific evidence is recorded.
+    depends_on: [AUTH-008, AUTH-030, AUTH-035]
     evidence: []
 
   - id: SEC-001

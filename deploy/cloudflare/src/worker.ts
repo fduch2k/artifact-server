@@ -49,6 +49,8 @@ import {parsePersonalApiKeyPolicy} from
   "../../../src/identity/personal-api-key-policy.js";
 import {parseSlidingSessionPolicy} from
   "../../../src/identity/sliding-session-policy.js";
+import {parseOwnerScopedManagement} from
+  "../../../src/identity/owner-scoped-management-policy.js";
 import {parseOidcAdmissionPolicy} from
   "../../../src/identity/oidc-admission-policy.js";
 
@@ -70,6 +72,7 @@ export interface WorkerEnvironment {
   readonly ARTIFACT_SERVER_OIDC_ISSUER?: string;
   readonly ARTIFACT_SERVER_OIDC_SCOPES?: string;
   readonly ARTIFACT_SERVER_ORIGIN: string;
+  readonly ARTIFACT_SERVER_OWNER_SCOPED_MANAGEMENT?: string;
   readonly ARTIFACT_SERVER_PERSONAL_API_KEYS?: string;
   readonly ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS?: string;
   readonly ARTIFACT_SERVER_QUALIFICATION_MODE?: "enabled";
@@ -167,6 +170,9 @@ async function createCloudflareRuntime(
   const slidingSessionPolicy = parseSlidingSessionPolicy(
     environment.ARTIFACT_SERVER_SESSION_IDLE_DAYS,
   );
+  const ownerScopedManagement = parseOwnerScopedManagement(
+    environment.ARTIFACT_SERVER_OWNER_SCOPED_MANAGEMENT,
+  );
   await migrateD1(
     environment.ARTIFACT_SERVER_D1_DATABASE,
     environment.ARTIFACT_SERVER_INSTALLATION_ID,
@@ -224,6 +230,9 @@ async function createCloudflareRuntime(
   if (slidingSessionPolicy !== null) {
     Object.assign(applicationAdapters, {slidingSessionPolicy});
   }
+  if (ownerScopedManagement) {
+    Object.assign(applicationAdapters, {ownerScopedManagement});
+  }
   if (gitHistory.provider !== null) {
     Object.assign(applicationAdapters, {gitHistoryProvider: gitHistory.provider});
   }
@@ -240,6 +249,7 @@ async function createCloudflareRuntime(
     completedRequestLogSampleRate: requestLogSampleRate(environment),
     contentDomain: environment.ARTIFACT_SERVER_CONTENT_DOMAIN,
     gitHistory: gitHistory.capability,
+    ownerScopedManagement,
     personalApiKeyPolicy,
     readiness: () => readiness(environment),
     trustedApplicationOrigin: origin.origin,

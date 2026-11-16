@@ -17,6 +17,12 @@ export type ArtifactOwnership = Pick<ArtifactRecord, "ownerPrincipalId">;
 /** Configuration trusted by standalone authorization policy. */
 export interface AuthorizationDependencies {
   readonly installationId: string;
+  /**
+   * A person's own session manages only the artifacts that person owns,
+   * unless they administer the installation (ADR 0038). Absent or false keeps
+   * AUTH-008: every member manages every artifact they can see.
+   */
+  readonly ownerScopedManagement?: boolean;
 }
 
 /** Authorization decisions shared by every application operation. */
@@ -33,6 +39,11 @@ export interface AuthorizationOperations {
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireCommentClear: (
     principal: Principal,
+  ) => Effect.Effect<void, AuthorizationDenied>;
+  /** The artifact-specific half of bulk clearing, checked once the artifact is found. */
+  readonly requireCommentClearOnArtifact: (
+    principal: Principal,
+    artifact: ArtifactOwnership,
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireInstallationAdministration: (
     principal: Principal,
@@ -100,6 +111,17 @@ function makeAuthorizationService(
       ? Effect.void
       : denied();
 
+  // Owner-scoped management (ADR 0038) narrows a person's own session the way
+  // 0032 narrowed keys: the owner and administrators manage, others read and
+  // comment. Without the setting every member manages (AUTH-008).
+  const sessionManages = (
+    principal: Principal,
+    artifact: ArtifactOwnership,
+  ): boolean =>
+    dependencies.ownerScopedManagement !== true ||
+    isHumanAdministrator(principal) ||
+    ownsArtifact(principal, artifact);
+
   const requireArtifactCreation = Effect.fn(
     "AuthorizationService.requireArtifactCreation",
   )(function*(principal: Principal) {
@@ -156,6 +178,18 @@ function makeAuthorizationService(
       isDirectHumanPrincipal(principal) ||
       hasCapability(principal, principalCapabilities.manageAnyArtifact)
     ) {
+      return;
+    }
+    yield* denied();
+  });
+
+  // Keys reached the clear through artifact:manage:any, which spans every
+  // artifact; a person's session is narrowed by owner-scoped management.
+  const requireCommentClearOnArtifact = Effect.fn(
+    "AuthorizationService.requireCommentClearOnArtifact",
+  )(function*(principal: Principal, artifact: ArtifactOwnership) {
+    yield* requireInstallation(principal);
+    if (!isDirectHumanPrincipal(principal) || sessionManages(principal, artifact)) {
       return;
     }
     yield* denied();
@@ -259,7 +293,10 @@ function makeAuthorizationService(
     "AuthorizationService.requireArtifactManagement",
   )(function*(principal: Principal, artifact: ArtifactOwnership) {
     yield* requireInstallation(principal);
-    if (isDirectHumanPrincipal(principal)) return;
+    if (isDirectHumanPrincipal(principal)) {
+      if (!sessionManages(principal, artifact)) yield* denied();
+      return;
+    }
     if (
       hasCapability(principal, principalCapabilities.manageAnyArtifact) ||
       (hasCapability(principal, principalCapabilities.manageOwnArtifact) &&
@@ -324,7 +361,10 @@ function makeAuthorizationService(
     "AuthorizationService.requireVersionPublication",
   )(function*(principal: Principal, artifact: ArtifactOwnership) {
     yield* requireInstallation(principal);
-    if (isDirectHumanPrincipal(principal)) return;
+    if (isDirectHumanPrincipal(principal)) {
+      if (!sessionManages(principal, artifact)) yield* denied();
+      return;
+    }
     if (
       hasCapability(principal, principalCapabilities.publishAnyArtifact) ||
       (hasCapability(principal, principalCapabilities.publishOwnArtifact) &&
@@ -338,6 +378,7 @@ function makeAuthorizationService(
   return AuthorizationService.of({
     requireAgentConnection,
     requireCommentClear,
+    requireCommentClearOnArtifact,
     requireDispatchCancel,
     requireDispatchSend,
     requireInstallationAdministration,

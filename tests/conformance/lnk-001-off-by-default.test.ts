@@ -39,6 +39,8 @@ const sessionSchema = z.object({
   capabilities: z.object({
     gitHistory: z.unknown(),
     linkedArtifacts: z.boolean(),
+    // Owner-scoped management stays off unless the operator opts in.
+    ownerScopedManagement: z.literal(false),
     // Personal API keys stay off unless the operator opts in.
     personalApiKeys: z.null(),
   }).strict(),
