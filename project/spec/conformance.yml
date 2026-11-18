@@ -2734,6 +2734,20 @@ requirements:
         run: project/evidence/html-fragment-navigation-browser.json
         recorded_at: "2026-10-06T15:37:19.847Z"
 
+  - id: CMT-023
+    kind: behavior
+    behavior: HTML Review previews paint an artifact on the canvas a plain browser tab would give it, whatever the Review theme; an artifact with no color scheme gets a light canvas, an artifact that declares both schemes follows the reader's system, and only an artifact that opts into the host theme follows the Review theme.
+    owner: artifact-comments
+    source: {file: artifact-comments-spec.md, anchor: html-preview-canvas}
+    acceptance:
+      behavior: {id: CMT-023-B, description: "On a light and on a dark system, open Review in the dark theme and switch to light and back: an artifact with no color scheme stays on a light canvas, an artifact that declares light and dark stays on the system's canvas, and an artifact that opts into the host theme turns dark, light, and dark with Review."}
+      failure: {id: CMT-023-F, description: "Switching the Review theme away and back cannot leave the Review background showing through an artifact canvas, so text an artifact colored for a light page never lands on the dark theme's background and a dark artifact canvas never turns light."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-023-B and CMT-023-F read painted pixels of the production Review build in local headless Chromium, with the system scheme emulated. The Chromium rule they guard, that a canvas turns transparent when the iframe's scheme changes to match the document's but not opaque again when it changes away, is not recorded for Firefox or WebKit. No deployment-specific evidence is recorded.
+    depends_on: [CMT-014, CMT-015]
+    evidence: []
+
   - id: ADM-001
     kind: behavior
     behavior: Artifact Server ships one canonical React application for Review and settings, plus the isolated Review frame; every former application route redirects to the equivalent canonical destination without serving or loading a legacy application bundle.

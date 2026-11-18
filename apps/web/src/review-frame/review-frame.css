@@ -14,6 +14,24 @@ body,
   height: 100%;
 }
 
+/*
+ * An artifact renders on the canvas a plain tab would give it. The browser
+ * leaves an embedded document's canvas transparent when the document's color
+ * scheme matches the iframe's and paints it opaque in the document's own scheme
+ * when they differ. The sandbox iframe stays light, whatever the Review theme,
+ * and a light canvas sits behind it: an artifact with no scheme lands on white
+ * instead of this document's dark background, and an artifact that resolves to
+ * dark gets the browser's opaque dark canvas. Following the Review theme
+ * instead would break on a theme switch: Chromium turns a canvas transparent
+ * when the iframe's scheme changes to match, but not opaque again when it
+ * changes away. HtmlViewer's own `color-scheme: auto` is an unknown scheme name
+ * that already counts as light; this states it.
+ */
+#review-root iframe {
+  background-color: Canvas;
+  color-scheme: light !important;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
