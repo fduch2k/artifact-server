@@ -323,6 +323,18 @@ their authored behavior. This preview behavior changes scrolling and focus,
 without emulating URL hash changes or browser history. It preserves stored
 artifact bytes, relative resource resolution, and the opaque-origin sandbox.
 
+### HTML preview canvas
+
+An HTML preview paints the artifact on the canvas a plain browser tab would
+give it, whatever the Review theme. An artifact that declares no color scheme
+renders on a light canvas, so text it colored for a light page stays readable
+in the dark theme. An artifact that declares both schemes follows the reader's
+system scheme. Only an artifact that opts into the host theme with
+`<meta name="plannotator-theme" content="host">` receives the Review theme
+tokens and color scheme and follows the Review theme. Switching the Review
+theme, in either direction and any number of times, keeps these outcomes and
+never leaves the Review background showing through an artifact canvas.
+
 ### Review route resolution
 
 The project, artifact, and version named in a Review URL are authoritative. The
