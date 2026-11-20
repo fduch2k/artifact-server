@@ -200,7 +200,11 @@ export function ReviewFrame(): React.ReactNode {
       fullViewport
       hideControls
       inputMethod="pinpoint"
-      mode="comment"
+      // A text selection first offers Copy and Comment and keeps focus on
+      // the artifact, so a reader can copy what they selected. "comment"
+      // would open the composer on every selection and take focus with it.
+      // A pinpoint click still opens the composer directly in both modes.
+      mode="selection"
       onAddAnnotation={handleAdd}
       onAnnotateModeExit={session.supportsAnnotateMode
         ? () => requestAnnotateMode(false)

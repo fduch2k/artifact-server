@@ -335,6 +335,19 @@ tokens and color scheme and follows the Review theme. Switching the Review
 theme, in either direction and any number of times, keeps these outcomes and
 never leaves the Review background showing through an artifact canvas.
 
+### HTML preview text selection
+
+Selecting text in an HTML preview keeps the selection and keyboard focus on
+the artifact and offers Copy and Comment beside it, in Annotate and Interact
+mode alike. The browser's copy shortcut and the Copy control both put exactly
+the selected text on the clipboard, and copying creates no comment. A comment
+starts only when the reader asks for one: the Comment control opens the
+composer quoting the selection, and typing a character opens it with that
+character as the start of the comment. Escape dismisses the offer without a
+comment, and the next selection offers Copy and Comment again. A plain click
+on an element in Annotate mode still opens the composer on that element
+directly.
+
 ### Review route resolution
 
 The project, artifact, and version named in a Review URL are authoritative. The
