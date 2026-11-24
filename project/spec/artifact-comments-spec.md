@@ -346,7 +346,8 @@ composer quoting the selection, and typing a character opens it with that
 character as the start of the comment. Escape dismisses the offer without a
 comment, and the next selection offers Copy and Comment again. A plain click
 on an element in Annotate mode still opens the composer on that element
-directly.
+directly. Every control on that offer stands out from it in the dark and light
+Review themes, at a contrast of at least 3:1.
 
 ### Review route resolution
 
