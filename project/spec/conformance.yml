@@ -2750,11 +2750,11 @@ requirements:
 
   - id: CMT-024
     kind: behavior
-    behavior: Selecting text in an HTML Review preview keeps the selection and focus on the artifact and offers Copy and Comment in Annotate and Interact mode; the copy shortcut and the Copy control copy exactly the selection, and a comment starts only from the Comment control or a typed character.
+    behavior: Selecting text in an HTML Review preview keeps the selection and focus on the artifact and offers Copy and Comment, legible in both Review themes, in Annotate and Interact mode; the copy shortcut and the Copy control copy exactly the selection, and a comment starts only from the Comment control or a typed character.
     owner: artifact-comments
     source: {file: artifact-comments-spec.md, anchor: html-preview-text-selection}
     acceptance:
-      behavior: {id: CMT-024-B, description: "In Annotate and in Interact mode, drag across artifact text: Copy and Comment appear, the copy shortcut and the Copy control each put the selected text on the clipboard, Comment opens the composer quoting the selection, and typing a character opens it with that character so the saved thread carries the typed body and the selected text."}
+      behavior: {id: CMT-024-B, description: "In Annotate and in Interact mode, drag across artifact text: Copy and Comment appear, the copy shortcut and the Copy control each put the selected text on the clipboard, Comment opens the composer quoting the selection, and typing a character opens it with that character so the saved thread carries the typed body and the selected text. In the dark and the light Review theme, every control on the offer reaches a contrast of at least 3:1 against it."}
       failure: {id: CMT-024-F, description: "A selection never opens the composer or moves focus out of the artifact by itself, copying and Escape create no comment, a second selection after a copy is offered again, and a plain click on an element in Annotate mode still opens the composer directly."}
     deployments: *all
     status: implementing

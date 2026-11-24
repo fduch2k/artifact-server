@@ -523,6 +523,10 @@ function reviewThemeTokens() {
   return {
     "--accent": value("--as-surface-raised"),
     "--accent-foreground": value("--as-text"),
+    // The viewer paints its Comment control in this token, which falls back to
+    // --accent. Here --accent is a raised surface, the same color as the
+    // selection toolbar, so the Comment icon would vanish against it.
+    "--annotation-comment": value("--as-iris"),
     "--background": value("--as-surface"),
     "--border": value("--as-border"),
     "--card": value("--as-surface"),

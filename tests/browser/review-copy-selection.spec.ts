@@ -110,6 +110,23 @@ test.describe("Review text selection", () => {
     });
   }
 
+  test("CMT-024-B: every control on the selection toolbar stands out from the toolbar in the dark and light themes", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser);
+    try {
+      const review = await openReview(fixture, "annotate");
+      await selectText(fixture.page, review, "#first");
+      await expectToolbarIconsVisible(review);
+
+      await fixture.page.keyboard.press("Escape");
+      await fixture.page.getByRole("button", {name: "Use light theme"}).first().click();
+      await expect(fixture.page.locator("html")).toHaveAttribute("data-review-theme", "dawn");
+      await selectText(fixture.page, review, "#first");
+      await expectToolbarIconsVisible(review);
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
   test("CMT-024-F: a click in Annotate mode still opens the composer on the clicked element", async ({browser}) => {
     const fixture = await startBrowserFixture(browser);
     try {
@@ -175,6 +192,58 @@ async function artifactHasFocus(review: OpenReview): Promise<boolean> {
   return review.reviewFrame.locator("iframe").evaluate((frame) =>
     frame.ownerDocument.activeElement === frame
   );
+}
+
+/**
+ * Each toolbar icon is drawn in its button's text color, so that color must
+ * reach the WCAG non-text contrast of 3:1 against the toolbar behind it.
+ */
+async function expectToolbarIconsVisible(review: OpenReview): Promise<void> {
+  const contrast = async (): Promise<Record<string, number>> => {
+    const painted = await review.reviewFrame.locator(".annotation-toolbar").evaluate((toolbar) => {
+      const canvas = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
+      if (canvas === null) throw new Error("No 2D canvas.");
+      // Colors come back in different notations (oklch, oklab, color-mix), so
+      // paint them, each over what sits behind it, and read the pixels back.
+      const paint = (...layers: readonly string[]): number[] => {
+        canvas.clearRect(0, 0, 1, 1);
+        for (const layer of layers) {
+          canvas.fillStyle = layer;
+          canvas.fillRect(0, 0, 1, 1);
+        }
+        return Array.from(canvas.getImageData(0, 0, 1, 1).data.slice(0, 3));
+      };
+      const page = getComputedStyle(document.body).backgroundColor;
+      const surface = getComputedStyle(toolbar).backgroundColor;
+      return {
+        icons: Array.from(toolbar.querySelectorAll("button"), (button) => ({
+          label: button.title,
+          rgb: paint(page, surface, getComputedStyle(button).color),
+        })),
+        surface: paint(page, surface),
+      };
+    });
+    const behind = relativeLuminance(painted.surface);
+    return Object.fromEntries(painted.icons.map(({label, rgb}) => {
+      const icon = relativeLuminance(rgb);
+      const ratio = (Math.max(icon, behind) + 0.05) / (Math.min(icon, behind) + 0.05);
+      return [label, Math.round(ratio * 100) / 100];
+    }));
+  };
+
+  await expect.poll(async () => Object.keys(await contrast())).toEqual(["Copy", "Comment", "Cancel"]);
+  await expect.poll(async () =>
+    Object.entries(await contrast()).filter(([, ratio]) => ratio < 3)
+  ).toEqual([]);
+}
+
+/** WCAG relative luminance of an sRGB color given as 0-255 channels. */
+function relativeLuminance(rgb: readonly number[]): number {
+  const [red = 0, green = 0, blue = 0] = rgb.map((channel) => {
+    const linear = channel / 255;
+    return linear <= 0.040_45 ? linear / 12.92 : ((linear + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
 }
 
 async function resetClipboard(page: Page): Promise<void> {
