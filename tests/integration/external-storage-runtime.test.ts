@@ -2599,6 +2599,12 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         state: "claimed",
       });
 
+      // DSP-018: a claimed dispatch keeps its agent registered.
+      expect(await repository.forgetAgent(
+        dispatchIdentity.installationId,
+        agent.id,
+        at(650_000),
+      )).toBe("active-dispatch");
       const canceled = await repository.cancelDispatch({
         canceledAt: at(660_000),
         dispatchId: second.dispatch.id,
@@ -2665,6 +2671,28 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         state: "addressed",
       }]);
       expect(secondPage.nextCursor).toBeNull();
+
+      // DSP-017: with every dispatch terminal the agent is forgotten once,
+      // leaves the listing, and its dispatch history stays.
+      expect(await repository.forgetAgent(
+        dispatchIdentity.installationId,
+        agent.id,
+        at(710_000),
+      )).toBe("forgotten");
+      expect(await repository.forgetAgent(
+        dispatchIdentity.installationId,
+        agent.id,
+        at(711_000),
+      )).toBe("missing");
+      expect(await repository.listAgents(
+        dispatchIdentity.installationId,
+        at(712_000),
+      )).toEqual([]);
+      expect(await repository.findDispatch(
+        dispatchIdentity.installationId,
+        sent.dispatch.id,
+        at(712_000),
+      )).toMatchObject({state: "addressed"});
     } finally {
       await database.close();
     }

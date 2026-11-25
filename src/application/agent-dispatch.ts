@@ -28,14 +28,14 @@ import {
   AgentNotFound,
   type ArtifactRepositoryFailure,
   AuthorizationDenied,
-  type DispatchStateConflict,
+  DispatchStateConflict,
   type IdempotencyConflict,
   type IdentityRepositoryFailure,
   InvalidDispatch,
   type InvalidIdempotencyKey,
   InvalidPagination,
 } from "../core/errors.js";
-import type {Principal} from "../core/identity.js";
+import {isHumanAdministrator, type Principal} from "../core/identity.js";
 import {
   type AgentActivityState,
   type AgentBeaconDetail,
@@ -58,6 +58,7 @@ import {
 import type {
   CancelAgentDispatch,
   CreateAgentDispatch,
+  ForgetAgentOutcome,
   IdGenerator,
   ListAgentDispatches,
   MarkDispatchDelivered,
@@ -103,6 +104,11 @@ export interface AgentDispatchPersistence {
     installationId: string,
     agentId: string,
   ) => Effect.Effect<void, AgentDispatchRepositoryFailure>;
+  readonly forgetAgent: (
+    installationId: string,
+    agentId: string,
+    now: string,
+  ) => Effect.Effect<ForgetAgentOutcome, AgentDispatchRepositoryFailure>;
   readonly findAgent: (
     installationId: string,
     agentId: string,
@@ -287,6 +293,9 @@ interface AgentDispatchOperations {
     command: CreateDispatchCommand,
   ) => Effect.Effect<AgentDispatchCreation, AgentDispatchFailure>;
   readonly disconnectAgent: (
+    command: ReadAgentCommand,
+  ) => Effect.Effect<void, AgentDispatchFailure>;
+  readonly forgetAgent: (
     command: ReadAgentCommand,
   ) => Effect.Effect<void, AgentDispatchFailure>;
   readonly getDispatch: (
@@ -567,6 +576,48 @@ function makeAgentDispatchService(
     },
   );
 
+  /**
+   * Forget one registered agent (ADR 0042). Its owner, through their own
+   * session or any of their keys holding agent:connect, and an administrator
+   * may; anyone else is told the agent does not exist, as for a missing one.
+   * An agent still holding a queued, claimed, or delivered dispatch stays.
+   */
+  const forgetAgent = Effect.fn("AgentDispatchService.forgetAgent")(
+    function*(command: ReadAgentCommand) {
+      yield* authorization.requireAgentRemoval(command.principal);
+      const agent = yield* dependencies.repository.findAgent(
+        dependencies.installationId,
+        command.agentId,
+      );
+      if (
+        agent === null || (
+          agent.principalId !== command.principal.id &&
+          !isHumanAdministrator(command.principal)
+        )
+      ) {
+        yield* Effect.fail(new AgentNotFound({
+          message: "The registered agent does not exist.",
+        }));
+        return;
+      }
+      const outcome = yield* dependencies.repository.forgetAgent(
+        dependencies.installationId,
+        agent.id,
+        yield* now(),
+      );
+      if (outcome === "missing") {
+        yield* Effect.fail(new AgentNotFound({
+          message: "The registered agent does not exist.",
+        }));
+      } else if (outcome === "active-dispatch") {
+        yield* Effect.fail(new DispatchStateConflict({
+          message:
+            `${agent.displayName} still holds a queued, claimed, or delivered dispatch. Cancel it, or wait until it fails or is addressed, then remove the agent.`,
+        }));
+      }
+    },
+  );
+
   const listAgents = Effect.fn("AgentDispatchService.listAgents")(
     function*(command: ListAgentsCommand) {
       yield* authorization.requireArtifactRead(command.principal);
@@ -775,6 +826,7 @@ function makeAgentDispatchService(
     claimDispatch,
     createDispatch,
     disconnectAgent,
+    forgetAgent,
     getDispatch,
     listAgents,
     listDispatches,

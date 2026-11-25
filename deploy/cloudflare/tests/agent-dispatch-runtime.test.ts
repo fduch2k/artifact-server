@@ -270,6 +270,12 @@ describe("Cloudflare D1 agent dispatch", () => {
     expect(deliveredDispatch.state).toBe("delivered");
     expect(deliveredDispatch.deliveredAt).not.toBeNull();
     await expectDeleteBlocked(worker, published, first);
+    // DSP-018: an agent holding a delivered dispatch cannot be forgotten.
+    const forgetBusy = await request(worker, `/api/v1/agents/${agent.id}`, {
+      method: "DELETE",
+    });
+    expect(forgetBusy.status).toBe(409);
+    expect(await readFailureCode(forgetBusy)).toBe("DISPATCH_STATE_CONFLICT");
 
     // Addressed is inferred from thread resolution on the read path, and only
     // once every bundle thread is resolved.
@@ -369,6 +375,15 @@ describe("Cloudflare D1 agent dispatch", () => {
       agentListSchema,
     );
     expect(remaining.items.map(({id}) => id)).toEqual([bystander.id]);
+    // DSP-017: an idle agent is forgotten and leaves the listing at once.
+    const forgotten = await request(worker, `/api/v1/agents/${bystander.id}`, {
+      method: "DELETE",
+    });
+    expect(forgotten.status).toBe(204);
+    expect((await readBody(
+      await request(worker, "/api/v1/agents"),
+      agentListSchema,
+    )).items).toEqual([]);
 
     await worker.stop();
     worker = await startWorker(persistPath);

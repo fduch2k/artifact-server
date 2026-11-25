@@ -103,6 +103,7 @@ import type {
   DeleteCommentThread,
   ExchangeContentBootstrap,
   ExpiredStagedUpload,
+  ForgetAgentOutcome,
   GrantArtifactAccess,
   ListAgentDispatches,
   ListArtifactActions,
@@ -3905,6 +3906,43 @@ export class SqliteArtifactRepository implements
         .run(installationId, agentId);
       return undefined;
     });
+  }
+
+  forgetAgent(
+    installationId: string,
+    agentId: string,
+    now: string,
+  ): Promise<ForgetAgentOutcome> {
+    return Promise.resolve().then(() =>
+      this.#transaction((): ForgetAgentOutcome => {
+        const activeSql = `${agentDispatchColumns}
+           WHERE d.installation_id = ? AND d.agent_id = ?
+             AND d.state IN ('queued', 'claimed', 'delivered')`;
+        // Settle what a read would settle first: a fully resolved delivered
+        // bundle is addressed, and a stale live agent's queue has failed.
+        const pending = z.array(agentDispatchRowSchema).parse(
+          this.#database.prepare(activeSql).all(installationId, agentId),
+        );
+        for (const row of pending) this.#applyLazyDispatchTransitions(row, now);
+        const stillActive = this.#database
+          .prepare(activeSql)
+          .all(installationId, agentId);
+        if (stillActive.length > 0) {
+          const exists = this.#database
+            .prepare(
+              "SELECT 1 AS found FROM registered_agents WHERE installation_id = ? AND id = ?",
+            )
+            .get(installationId, agentId);
+          return exists === undefined ? "missing" : "active-dispatch";
+        }
+        const removed = this.#database
+          .prepare(
+            "DELETE FROM registered_agents WHERE installation_id = ? AND id = ?",
+          )
+          .run(installationId, agentId);
+        return removed.changes === 1 ? "forgotten" : "missing";
+      }),
+    );
   }
 
   listAgents(

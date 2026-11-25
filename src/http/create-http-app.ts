@@ -1330,6 +1330,20 @@ export function createHttpApp(
     return context.json({items: agents.map(connectedAgentResponse)});
   });
 
+  app.delete("/api/v1/agents/:agentId", async (context) => {
+    await runHttpApplicationEffect(
+      context,
+      dependencies,
+      AgentDispatchService.use((dispatches) =>
+        dispatches.forgetAgent({
+          agentId: context.req.param("agentId"),
+          principal: context.get("principal"),
+        })
+      ),
+    );
+    return context.body(null, 204);
+  });
+
   app.post("/api/v1/agents/:agentId/disconnect", async (context) => {
     await runHttpApplicationEffect(
       context,

@@ -3158,6 +3158,34 @@ requirements:
     depends_on: [DSP-003, DSP-010, AUTH-033, AUTH-036]
     evidence: []
 
+  - id: DSP-017
+    kind: security
+    behavior: An agent's owner, from their own session or a key holding agent:connect, and an administrator forget an idle registered agent; it leaves every listing at once and the same client registering again gets a new row. Another member, that member's keys, and a missing agent all answer the same AGENT_NOT_FOUND.
+    owner: agent-dispatch
+    source: {file: decisions/0042-forget-registered-agents.md, anchor: decision}
+    acceptance:
+      behavior: {id: DSP-017-B, description: "The owner removes an idle agent from their session and another with their agent:connect key, an administrator removes another member's agent, each leaves the unscoped and per-artifact listings at once, and the same connection key registers again under a new id; in Review an administrator removes an idle agent from Settings, Agents."}
+      failure: {id: DSP-017-F, description: "Another member's session and key get 404 AGENT_NOT_FOUND with the message a missing agent gets, a key without agent:connect gets 403 before any lookup, nothing is removed by a refused call, and a removed agent cannot be removed twice."}
+    deployments: *all
+    status: implementing
+    proof_gap: DSP-017-B and DSP-017-F run over HTTP against the local SQLite server with OIDC-signed member sessions and personal keys, and the Review half runs in Chromium in local-owner mode as the administrator; the Remove control for a non-administrator member is not driven in a browser. The Postgres repository case is in the external-storage runtime suite but has not been run on this machine (no Docker); its fork CI run is not recorded here. D1 is covered by the Worker dispatch runtime test with one key.
+    depends_on: [DSP-010, DSP-015, AUTH-036]
+    evidence: []
+
+  - id: DSP-018
+    kind: behavior
+    behavior: An agent holding a queued, claimed, or delivered dispatch cannot be forgotten by its owner or an administrator until the dispatch is canceled, failed, or addressed, with the lazy transitions applied first; the dispatch record outlives the agent.
+    owner: agent-dispatch
+    source: {file: decisions/0042-forget-registered-agents.md, anchor: decision}
+    acceptance:
+      behavior: {id: DSP-018-B, description: "Agents whose dispatches were canceled, reported failed, and delivered then fully resolved without an intervening read are each removed, and the three dispatches still read canceled, failed, and addressed."}
+      failure: {id: DSP-018-F, description: "While the agent's dispatch is queued, then claimed, then delivered, removal by the owner and by an administrator answers 409 DISPATCH_STATE_CONFLICT naming the way out, the dispatch keeps its state, the agent stays listed, and its thread stays away from the open list; in Review the refusal shows in the removal dialog."}
+    deployments: *all
+    status: implementing
+    proof_gap: DSP-018-B and DSP-018-F run over HTTP against the local SQLite server; the Review refusal runs in the DSP-017-B Chromium test. Postgres claimed-refusal and terminal-removal cases are in the external-storage runtime suite, not run here (no Docker). D1 checks the delivered refusal and an idle removal in the Worker dispatch runtime test, not the canceled and failed paths.
+    depends_on: [DSP-007, DSP-008, DSP-009, DSP-017]
+    evidence: []
+
   - id: BRP-001
     kind: behavior
     behavior: The extracted bridge core is host-agnostic. It drives a fake host through register, claim, deliver, reply, and resolve against a real server, and its module graph reaches no Pi code.

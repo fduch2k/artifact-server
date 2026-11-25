@@ -30,6 +30,9 @@ export interface AuthorizationOperations {
   readonly requireAgentConnection: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
+  readonly requireAgentRemoval: (
+    principal: Principal,
+  ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireDispatchSend: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
@@ -144,6 +147,22 @@ function makeAuthorizationService(
     yield* requireInstallation(principal);
     if (
       !isDirectHumanPrincipal(principal) &&
+      hasCapability(principal, principalCapabilities.connectAgents)
+    ) {
+      return;
+    }
+    yield* denied();
+  });
+
+  // Forgetting an agent is open to a person's own session, where Review
+  // offers it, and to a key that connects agents, which already disconnects
+  // them; which agent is decided against the owner (ADR 0042).
+  const requireAgentRemoval = Effect.fn(
+    "AuthorizationService.requireAgentRemoval",
+  )(function*(principal: Principal) {
+    yield* requireInstallation(principal);
+    if (
+      isDirectHumanPrincipal(principal) ||
       hasCapability(principal, principalCapabilities.connectAgents)
     ) {
       return;
@@ -377,6 +396,7 @@ function makeAuthorizationService(
 
   return AuthorizationService.of({
     requireAgentConnection,
+    requireAgentRemoval,
     requireCommentClear,
     requireCommentClearOnArtifact,
     requireDispatchCancel,
