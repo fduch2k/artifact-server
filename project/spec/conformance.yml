@@ -1855,6 +1855,20 @@ requirements:
     depends_on: [AUTH-002, AUTH-014, AUTH-015, AUTH-019, AUTH-026]
     evidence: []
 
+  - id: AUTH-042
+    kind: behavior
+    behavior: A person's browser whose sign-in this installation refuses, whose sign-in did not finish, or whose private link names nothing the viewer can see gets a short non-cacheable HTML page saying what happened and what to do; programs, embedded resources, and HEAD requests keep the JSON error and status, and a restricted artifact's page is indistinguishable from a missing one's.
+    owner: authorization
+    source: {file: decisions/0043-browser-failure-pages.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-042-B, description: "A person outside the admitted domains signs in through a real stub OIDC provider from a private link and gets a 403 page telling them to ask an administrator, with no session cookie; an unverified email gets the same page; a signed-in member opening a restricted artifact from the latest link or the exact-version route gets a 404 page telling them to check the link or ask for access; a replayed callback and a failing provider get a sign-in-did-not-finish page with a link to sign in again; every page is private, no-store, text/html, has a closed Content-Security-Policy, and shows no error code, artifact ID, token, title, or email."}
+      failure: {id: AUTH-042-F, description: "For a signed-in member, a restricted artifact, a missing artifact, a restricted version, an unknown version, and a malformed version token answer document navigations with the same status, body bytes, and headers apart from Date; programs, image and frame loads, JSON requests, and HEAD keep ARTIFACT_NOT_FOUND, INVALID_INPUT, or IDENTITY_ADMISSION_DENIED as JSON with their status; and a refused person receives no session, so the private link still sends them to sign in."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-042-B and AUTH-042-F run against the local SQLite server in private-team mode with a stub OIDC provider driven over real HTTP, with browser requests sent as raw HTTP carrying document-navigation headers. No Chromium run, Keycloak run, Postgres or D1 run, or deployment-specific evidence is recorded. The JSON answer of a program asking the exact-version route still tells ARTIFACT_NOT_FOUND for a restricted version from VERSION_NOT_FOUND for an unknown one; this requirement covers only the browser page.
+    depends_on: [AUTH-019, AUTH-031, AUTH-038]
+    evidence: []
+
   - id: AUTH-039
     kind: security
     behavior: A key holding agent:dispatch sends dispatches with its principal's reach and cancels only the dispatches its principal sent; without the capability a key cannot send or cancel, and the capability does not reach bulk comment clearing.

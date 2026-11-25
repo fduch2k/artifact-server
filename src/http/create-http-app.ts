@@ -135,6 +135,12 @@ import {
   decideByteRange,
   ifRangeAllowsPartialResponse,
 } from "./byte-range.js";
+import {
+  type BrowserFailurePage,
+  browserFailurePageResponse,
+  browserFailurePages,
+  prefersBrowserFailurePage,
+} from "./browser-failure-page.js";
 import {isDocumentNavigation, permitsSpaEntryFallback} from "./spa-navigation.js";
 import {
   maximumCommentPageSize,
@@ -1046,25 +1052,26 @@ export function createHttpApp(
     return context.redirect(started.authorizationUrl, 302);
   });
 
-  app.get("/auth/callback", async (context) => {
-    const query = interactiveCallbackSchema.parse(context.req.query());
-    const handshake = getCookie(
-      context,
-      applicationCookieNames(dependencies).handshake,
-    ) ?? null;
-    const completed = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      InteractiveLoginService.use((login) =>
-        login.complete({...query, handshake})
-      ),
-    );
-    clearLoginHandshakeCookie(context, dependencies);
-    setApplicationSessionCookies(context, dependencies, completed.issued);
-    context.header("Cache-Control", "private, no-store");
-    context.header("Referrer-Policy", "no-referrer");
-    return context.redirect(completed.returnTo, 303);
-  });
+  app.get("/auth/callback", (context) =>
+    answeringBrowserFailures(context, dependencies, signInFailurePage, async () => {
+      const query = interactiveCallbackSchema.parse(context.req.query());
+      const handshake = getCookie(
+        context,
+        applicationCookieNames(dependencies).handshake,
+      ) ?? null;
+      const completed = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        InteractiveLoginService.use((login) =>
+          login.complete({...query, handshake})
+        ),
+      );
+      clearLoginHandshakeCookie(context, dependencies);
+      setApplicationSessionCookies(context, dependencies, completed.issued);
+      context.header("Cache-Control", "private, no-store");
+      context.header("Referrer-Policy", "no-referrer");
+      return context.redirect(completed.returnTo, 303);
+    }));
 
   app.get("/api/v1/session", (context) =>
     context.json({
@@ -2644,79 +2651,81 @@ export function createHttpApp(
     }, 201);
   });
 
-  app.get("/artifacts/:artifactId", async (context) => {
-    const artifactId = context.req.param("artifactId");
-    const resolved = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      ContentAccessService.use((contentAccess) =>
-        contentAccess.resolvePublicArtifact(artifactId).pipe(
-          Effect.map((current) => ({current, kind: "public" as const})),
-          Effect.catchTag("ContentSessionRequired", (failure) =>
-            Effect.succeed({failure, kind: "private" as const})),
-        )
-      ),
-    );
-    if (resolved.kind === "public") {
-      const versionUrl = versionBrowserUrl(
-        responseApplicationUrl(context, dependencies),
-        dependencies.contentDomain,
-        resolved.current.version.contentToken,
-      );
-      return context.redirect(versionUrl, 302);
-    }
-    // A private latest link opens for a signed-in member through a one-time
-    // content bootstrap, and sends a signed-out person's browser to sign in
-    // and back here. Programs keep the plain 401.
-    const principal = await browserSessionPrincipal(context, dependencies);
-    if (principal === null) {
-      if (!isDocumentNavigation(context.req.raw.headers)) throw resolved.failure;
-      return redirectToBrowserSignIn(
+  app.get("/artifacts/:artifactId", (context) =>
+    answeringBrowserFailures(context, dependencies, privateLinkFailurePage, async () => {
+      const artifactId = context.req.param("artifactId");
+      const resolved = await runHttpApplicationEffect(
         context,
         dependencies,
-        `/artifacts/${encodeURIComponent(artifactId)}`,
+        ContentAccessService.use((contentAccess) =>
+          contentAccess.resolvePublicArtifact(artifactId).pipe(
+            Effect.map((current) => ({current, kind: "public" as const})),
+            Effect.catchTag("ContentSessionRequired", (failure) =>
+              Effect.succeed({failure, kind: "private" as const})),
+          )
+        ),
       );
-    }
-    const issued = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      ContentAccessService.use((contentAccess) =>
-        contentAccess.issueBrowserContentBootstrap({
-          principal,
-          target: {artifactId, kind: "latest"},
-        })
-      ),
-    );
-    return redirectToContentBootstrap(context, dependencies, issued);
-  });
+      if (resolved.kind === "public") {
+        const versionUrl = versionBrowserUrl(
+          responseApplicationUrl(context, dependencies),
+          dependencies.contentDomain,
+          resolved.current.version.contentToken,
+        );
+        return context.redirect(versionUrl, 302);
+      }
+      // A private latest link opens for a signed-in member through a one-time
+      // content bootstrap, and sends a signed-out person's browser to sign in
+      // and back here. Programs keep the plain 401.
+      const principal = await browserSessionPrincipal(context, dependencies);
+      if (principal === null) {
+        if (!isDocumentNavigation(context.req.raw.headers)) throw resolved.failure;
+        return redirectToBrowserSignIn(
+          context,
+          dependencies,
+          `/artifacts/${encodeURIComponent(artifactId)}`,
+        );
+      }
+      const issued = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        ContentAccessService.use((contentAccess) =>
+          contentAccess.issueBrowserContentBootstrap({
+            principal,
+            target: {artifactId, kind: "latest"},
+          })
+        ),
+      );
+      return redirectToContentBootstrap(context, dependencies, issued);
+    }));
 
   // An exact-version address that met a browser without a content session
   // sends it here: the application origin knows who is signed in, issues that
   // version's bootstrap, and returns the browser to the same file.
-  app.get(`${browserVersionOpenPath}/:contentToken`, async (context) => {
-    const contentToken = contentTokenSchema.parse(context.req.param("contentToken"));
-    const destinationPath = requestedContentPath(context);
-    const principal = await browserSessionPrincipal(context, dependencies);
-    if (principal === null) {
-      const requestUrl = new URL(context.req.url);
-      return redirectToBrowserSignIn(
+  app.get(`${browserVersionOpenPath}/:contentToken`, (context) =>
+    answeringBrowserFailures(context, dependencies, privateLinkFailurePage, async () => {
+      const contentToken = contentTokenSchema.parse(context.req.param("contentToken"));
+      const destinationPath = requestedContentPath(context);
+      const principal = await browserSessionPrincipal(context, dependencies);
+      if (principal === null) {
+        const requestUrl = new URL(context.req.url);
+        return redirectToBrowserSignIn(
+          context,
+          dependencies,
+          `${requestUrl.pathname}${requestUrl.search}`,
+        );
+      }
+      const issued = await runHttpApplicationEffect(
         context,
         dependencies,
-        `${requestUrl.pathname}${requestUrl.search}`,
+        ContentAccessService.use((contentAccess) =>
+          contentAccess.issueBrowserContentBootstrap({
+            principal,
+            target: {contentToken, kind: "version_origin"},
+          })
+        ),
       );
-    }
-    const issued = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      ContentAccessService.use((contentAccess) =>
-        contentAccess.issueBrowserContentBootstrap({
-          principal,
-          target: {contentToken, kind: "version_origin"},
-        })
-      ),
-    );
-    return redirectToContentBootstrap(context, dependencies, issued, destinationPath);
-  });
+      return redirectToContentBootstrap(context, dependencies, issued, destinationPath);
+    }));
 
   app.notFound((context) =>
     context.json(
@@ -2840,6 +2849,84 @@ async function browserSessionPrincipal(
     );
   }
   return authenticated.principal;
+}
+
+interface ChosenBrowserFailurePage {
+  readonly page: BrowserFailurePage;
+  readonly status: number;
+}
+
+/**
+ * Answer a person's browser with a page instead of the JSON error when a page
+ * route fails in a way `choosePage` recognizes. Programs, embedded loads, and
+ * `HEAD` requests, and every failure it does not recognize, keep the ordinary
+ * JSON error handling.
+ */
+async function answeringBrowserFailures(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+  choosePage: (error: Error) => ChosenBrowserFailurePage | null,
+  handler: () => Promise<Response>,
+): Promise<Response> {
+  try {
+    return await handler();
+  } catch (error) {
+    if (
+      !(error instanceof Error)
+      || !prefersBrowserFailurePage(context.req.method, context.req.raw.headers)
+    ) {
+      throw error;
+    }
+    const chosen = choosePage(error);
+    if (chosen === null) throw error;
+    if (chosen.status >= 500 && isArtifactServerFailure(error)) {
+      await logAdapterFailure(
+        dependencies.applicationRuntime,
+        context.get("requestId"),
+        error._tag,
+        "request",
+      );
+    }
+    return browserFailurePageResponse(chosen.page, chosen.status);
+  }
+}
+
+/**
+ * A private link that names nothing the viewer can see. A missing artifact,
+ * a restricted one the viewer may not read, an unknown version, and a
+ * malformed link all get the same page, so the page reveals nothing.
+ */
+function privateLinkFailurePage(error: Error): ChosenBrowserFailurePage | null {
+  if (
+    error instanceof z.ZodError
+    || (isArtifactServerFailure(error) && (
+      error._tag === "ArtifactNotFound"
+      || error._tag === "ProjectNotFound"
+      || error._tag === "VersionNotFound"
+    ))
+  ) {
+    return {page: browserFailurePages.linkNotFound, status: 404};
+  }
+  return null;
+}
+
+/** A browser returning from the identity provider without a session. */
+function signInFailurePage(error: Error): ChosenBrowserFailurePage | null {
+  if (error instanceof z.ZodError) {
+    return {page: browserFailurePages.signInUnfinished, status: 422};
+  }
+  if (!isArtifactServerFailure(error)) return null;
+  // The page keeps the status a program would receive for the same failure.
+  const {status} = httpFailure(error);
+  switch (error._tag) {
+    case "IdentityAdmissionDenied":
+      return {page: browserFailurePages.admissionRefused, status};
+    case "LoginAttemptRejected":
+    case "IdentityProviderFailure":
+      return {page: browserFailurePages.signInUnfinished, status};
+    default:
+      return null;
+  }
 }
 
 /**
