@@ -2790,6 +2790,20 @@ requirements:
     depends_on: [CMT-025, DSP-009]
     evidence: []
 
+  - id: CMT-027
+    kind: behavior
+    behavior: Review warns that a thread's location is unavailable only when the thread carries a Review anchor that cannot be placed in the version; whole-version threads and threads anchored in another client's format show no warning.
+    owner: artifact-comments
+    source: {file: artifact-comments-spec.md, anchor: review-thread-views}
+    acceptance:
+      behavior: {id: CMT-027-B, description: "A Review anchor whose element and text are missing from the HTML version shows 'Location unavailable in this version' on its card, and a placeable Review anchor draws its marker without the warning."}
+      failure: {id: CMT-027-F, description: "A whole-version thread with a null anchor, a page thread with a null anchor, and a page thread with an opaque API anchor show no warning, and the whole-version thread still reads 'Whole version'."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-027-B and CMT-027-F drive the production Review build in headless Chromium against HTML versions, where the review frame reports placement. Firefox, WebKit, and deployment-specific evidence are not recorded.
+    depends_on: [CMT-014, CMT-015]
+    evidence: []
+
   - id: ADM-001
     kind: behavior
     behavior: Artifact Server ships one canonical React application for Review and settings, plus the isolated Review frame; every former application route redirects to the equivalent canonical destination without serving or loading a legacy application bundle.

@@ -404,6 +404,11 @@ default, which excludes dispatched threads, does not change.
 When Open is empty because its threads went to agents, it says how many were
 sent and links to Sent instead of calling the version resolved.
 
+A thread whose Review anchor cannot be placed in the version says "Location
+unavailable in this version". A thread with no anchor, or with an anchor in a
+format Review does not place (an API or MCP client's own), never had a place on
+the page and shows no warning.
+
 ### Dispatch-bound comment deletion
 
 A dispatch package is an immutable delivery and audit record. A comment thread

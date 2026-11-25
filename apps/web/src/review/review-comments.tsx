@@ -118,6 +118,15 @@ function toAnnotation(thread: CommentThread): ReviewAnnotation {
   };
 }
 
+/**
+ * Whether a thread was placed on the page in Review. A whole-version comment,
+ * and one an API or MCP client anchored in its own format, never had a place
+ * here, so not finding one is not worth a warning.
+ */
+function hasReviewAnchor(thread: CommentThread): boolean {
+  return reviewAnchorSchema.safeParse(thread.anchor).success;
+}
+
 async function loadConversations(
   projectId: string,
   artifactId: string,
@@ -851,7 +860,8 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                         )}
                       </span>
                     </div>
-                    {view !== "sent" && unanchored.has(thread.id) ? (
+                    {view !== "sent" && hasReviewAnchor(thread)
+                        && unanchored.has(thread.id) ? (
                       <small>Location unavailable in this version</small>
                     ) : null}
                     <div className="as-comment-card__actions">

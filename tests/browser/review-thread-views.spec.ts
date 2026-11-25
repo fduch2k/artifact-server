@@ -68,6 +68,14 @@ function filter(page: Page, name: string) {
 
 const cards = (page: Page) => page.locator(".as-comment-card");
 
+/** A Review anchor on one paragraph, as the review frame saves it. */
+function anchored(selector: string, text: string) {
+  return {
+    htmlAnchor: {point: {x: 0.5, y: 0.5}, selector, tagName: "P", text},
+    originalText: text,
+  };
+}
+
 test.describe("Review thread views", () => {
   test("CMT-025-B CMT-025-F: Resolved and All keep threads an agent addressed, and the count matches All", async ({browser}) => {
     const fixture = await startBrowserFixture(browser);
@@ -223,4 +231,51 @@ test.describe("Review thread views", () => {
     }
   });
 
+  test("CMT-027-B CMT-027-F: only a Review anchor that cannot be placed warns that its location is unavailable", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser);
+    try {
+      const published = await publishFixture(fixture, "cmt-027");
+      const drafts = [
+        {anchor: null, path: null, word: "whole version"},
+        {anchor: null, path: "index.html", word: "api page"},
+        {anchor: {kind: "page"}, path: "index.html", word: "foreign anchor"},
+        {anchor: anchored("#target", "Review target"), path: "index.html", word: "placed"},
+        {
+          anchor: anchored(
+            "#removed-in-this-version",
+            "A paragraph this version no longer has",
+          ),
+          path: "index.html",
+          word: "lost",
+        },
+      ] as const;
+      await Promise.all(drafts.map(({anchor, path, word}) => {
+        const draft = {
+          anchor,
+          artifactId: published.artifact.id,
+          body: `Thread ${word}`,
+          idempotencyKey: `cmt-027-thread-${word.replaceAll(" ", "-")}`,
+          versionId: published.version.id,
+        };
+        return createThreadOverApi(fixture, path === null ? draft : {...draft, path});
+      }));
+
+      const page = await openComments(fixture, published.artifact.id, published.version.id);
+      await expect(cards(page)).toHaveCount(5);
+      const preview = page.frameLocator(".as-artifact-frame").frameLocator("iframe");
+      await expect(preview.locator("button[data-plannotator-marker]")).toHaveCount(1);
+
+      const warning = "Location unavailable in this version";
+      await expect(cards(page).filter({hasText: "Thread lost"})).toContainText(warning);
+      await expect(page.getByText(warning)).toHaveCount(1);
+      await expect(cards(page).filter({hasText: "Thread whole version"}))
+        .toContainText("Whole version");
+      await Promise.all(["whole version", "api page", "foreign anchor", "placed"].map(
+        (word) => expect(cards(page).filter({hasText: `Thread ${word}`}))
+          .not.toContainText(warning),
+      ));
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
 });
