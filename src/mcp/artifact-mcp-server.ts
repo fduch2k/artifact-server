@@ -104,6 +104,7 @@ import {
   composeToolResultNudge,
   nudgeFreeTools,
   type ToolResultNudgeFacts,
+  withNudgeField,
 } from "./tool-result-nudges.js";
 
 const serverVersion = "0.1.2";
@@ -441,18 +442,24 @@ export function createArtifactMcpServer(
       title?: string;
       description?: string;
       inputSchema?: InputArgs;
-      outputSchema?: StandardSchemaWithJSON;
+      outputSchema?: z.ZodObject;
       annotations?: ToolAnnotations;
     },
     callback: ToolCallback<InputArgs>,
   ): RegisteredTool {
-    const registered = server.registerTool(name, config, callback);
     // A schemaless tool keeps its original callback on purpose: the SDK
     // invokes such a tool with a single context argument, which the
     // two-argument nudge wrapper below cannot forward. None exist today.
     if (nudgeFreeTools.has(name) || config.inputSchema === undefined) {
-      return registered;
+      return server.registerTool(name, config, callback);
     }
+    // The SDK validates structuredContent against the advertised schema, and
+    // clients do too, so a nudged tool advertises the optional nudge field.
+    const nudgedConfig = {...config};
+    if (config.outputSchema !== undefined) {
+      nudgedConfig.outputSchema = withNudgeField(name, config.outputSchema);
+    }
+    const registered = server.registerTool(name, nudgedConfig, callback);
     const execute = registered.executor;
     registered.update({
       callback: async (toolArguments, context) => {

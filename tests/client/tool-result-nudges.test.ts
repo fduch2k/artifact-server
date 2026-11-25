@@ -7,12 +7,14 @@
  */
 
 import {describe, expect, test} from "vitest";
+import {z} from "zod";
 
 import {
   appendToolResultNudge,
   composeToolResultNudge,
   maximumNudgeCharacters,
   nudgeHeading,
+  withNudgeField,
 } from "../../src/mcp/tool-result-nudges.js";
 
 // ASCII-escaped codepoints only, so the hostile set is visible in review.
@@ -69,7 +71,7 @@ describe("tool-result nudge composition", () => {
     }
   });
 
-  test("bounds one block and appends it as a trailing text item only", () => {
+  test("bounds one block and attaches it as the nudge field and one trailing text item", () => {
     expect.hasAssertions();
     const nudge = composeToolResultNudge({
       activeBundle: {dispatchId: "x".repeat(2_000)},
@@ -84,9 +86,27 @@ describe("tool-result nudge composition", () => {
       structuredContent: {ok: true},
     };
     const appended = appendToolResultNudge(original, nudge ?? "");
-    expect(appended.structuredContent).toBe(original.structuredContent);
+    // The structured value gains only the nudge field; the original is not
+    // mutated, so a cached result stays nudge-free.
+    expect(appended.structuredContent).toEqual({nudge, ok: true});
+    expect(original.structuredContent).toEqual({ok: true});
     expect(appended.content).toHaveLength(2);
     expect(appended.content[0]).toBe(original.content[0]);
     expect(appended.content[1]).toEqual({text: nudge, type: "text"});
+  });
+
+  test("adds an optional bounded nudge field to a strict output schema and refuses a tool that already owns the name", () => {
+    expect.hasAssertions();
+    const extended = withNudgeField("project_list", z.object({ok: z.boolean()}).strict());
+    expect(extended.safeParse({ok: true}).success).toBe(true);
+    expect(extended.safeParse({nudge: "x", ok: true}).success).toBe(true);
+    // Still strict: only the nudge field was added.
+    expect(extended.safeParse({ok: true, other: 1}).success).toBe(false);
+    expect(extended.safeParse({
+      nudge: "x".repeat(maximumNudgeCharacters + 1),
+      ok: true,
+    }).success).toBe(false);
+    expect(() => withNudgeField("clashing_tool", z.object({nudge: z.number()})))
+      .toThrow('Tool clashing_tool declares the reserved output field "nudge".');
   });
 });

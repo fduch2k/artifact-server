@@ -1,0 +1,21 @@
+{
+  "outcomes": [
+    {
+      "answerRepeatsNudge": true,
+      "host": "claude-code",
+      "nudgeSeenByModel": true,
+      "toolResultSeenByModel": "\"{\\\"artifactId\\\":\\\"art_7b5f3dd1-554f-47d6-91f6-ca188cb70288\\\",\\\"versions\\\":[{\\\"contentUrl\\\":\\\"http://21ea0bce6461339e5fb066be65c425c01931.localhost:36641/\\\",\\\"createdAt\\\":\\\"2026-11-25T10:24:41.518Z\\\",\\\"entryPath\\\":\\\"index.html\\\",\\\"id\\\":\\\"ver_004cf652-692f-4b71-ac38-6c293efb5c13\\\",\\\"manifestDigest\\\":\\\"7e0840c696ff0e1dd3eb85580f38ef2e8bc7daaead99c6fc2e86a03c2a114a60\\\",\\\"number\\\":1,\\\"publisherPrincipalId\\\":\\\"local-api-token\\\"}],\\\"nudge\\\":\\\"— artifact server —\\\\n1 review bundle is queued for your inbox. Call dispatch_inbox {\\\\\\\"operation\\\\\\\": \\\\\\\"claim\\\\\\\"} to pick up the oldest.\\\"}\"",
+      "version": "2.1.332 (Claude Code)"
+    },
+    {
+      "answerRepeatsNudge": true,
+      "host": "codex",
+      "nudgeSeenByModel": true,
+      "toolResultSeenByModel": "{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"artifactId\\\":\\\"art_7b5f3dd1-554f-47d6-91f6-ca188cb70288\\\",\\\"versions\\\":[{\\\"contentUrl\\\":\\\"http://21ea0bce6461339e5fb066be65c425c01931.localhost:36641/\\\",\\\"createdAt\\\":\\\"2026-11-25T10:24:41.518Z\\\",\\\"entryPath\\\":\\\"index.html\\\",\\\"id\\\":\\\"ver_004cf652-692f-4b71-ac38-6c293efb5c13\\\",\\\"manifestDigest\\\":\\\"7e0840c696ff0e1dd3eb85580f38ef2e8bc7daaead99c6fc2e86a03c2a114a60\\\",\\\"number\\\":1,\\\"publisherPrincipalId\\\":\\\"local-api-token\\\"}]}\"},{\"type\":\"text\",\"text\":\"— artifact server —\\n1 review bundle is queued for your inbox. Call dispatch_inbox {\\\"operation\\\": \\\"claim\\\"} to pick up the oldest.\"}],\"structured_content\":{\"artifactId\":\"art_7b5f3dd1-554f-47d6-91f6-ca188cb70288\",\"versions\":[{\"contentUrl\":\"http://21ea0bce6461339e5fb066be65c425c01931.localhost:36641/\",\"createdAt\":\"2026-11-25T10:24:41.518Z\",\"entryPath\":\"index.html\",\"id\":\"ver_004cf652-692f-4b71-ac38-6c293efb5c13\",\"manifestDigest\":\"7e0840c696ff0e1dd3eb85580f38ef2e8bc7daaead99c6fc2e86a03c2a114a60\",\"number\":1,\"publisherPrincipalId\":\"local-api-token\"}],\"nudge\":\"— artifact server —\\n1 review bundle is queued for your inbox. Call dispatch_inbox {\\\"operation\\\": \\\"claim\\\"} to pick up the oldest.\"}}",
+      "version": "codex-cli 0.169.0"
+    }
+  ],
+  "passed": true,
+  "recordedAt": "2026-11-25T10:25:15.651Z",
+  "requirement": "MCP-021"
+}

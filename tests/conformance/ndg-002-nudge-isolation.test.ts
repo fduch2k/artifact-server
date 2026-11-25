@@ -2,9 +2,10 @@
  * NDG-002 — nudges are principal-scoped and leave typed results untouched.
  * A nudge is derived strictly from the caller's own mailbox agent, so a
  * second principal calling the same tools sees none of the first's counts;
- * and `structuredContent` and every existing content item are byte-identical
- * with and without a pending nudge, which only ever appends one bounded
- * trailing text item that quotes no untrusted text.
+ * and every existing structured field and content item is byte-identical
+ * with and without a pending nudge, which only ever adds the optional
+ * `nudge` field and one bounded trailing text item, both quoting no
+ * untrusted text.
  */
 
 import {
@@ -44,6 +45,7 @@ const inboxAnswerSchema = z.object({
 const threadCreationSchema = z.object({
   thread: z.object({id: z.string()}).loose(),
 }).loose();
+const nudgedStructureSchema = z.object({nudge: z.string()}).loose();
 const toolCallResultSchema = z.object({
   id: z.union([z.string(), z.number()]),
   jsonrpc: z.literal("2.0"),
@@ -79,7 +81,7 @@ describe("nudge isolation on MCP tool results", () => {
     await removeTestInstallation(installation);
   });
 
-  test("NDG-002-B: structuredContent and the existing content items are byte-identical with and without a pending nudge, and the nudge is one bounded trailing item that quotes no untrusted text", async () => {
+  test("NDG-002-B: every existing structured field and content item is byte-identical with and without a pending nudge, and the nudge is one bounded value, in the nudge field and one trailing item, that quotes no untrusted text", async () => {
     expect.hasAssertions();
     const thread = await openThread("Adjust the palette.", "ndg-002-thread-palette");
     const registered = inboxAnswerSchema.parse(
@@ -105,13 +107,17 @@ describe("nudge isolation on MCP tool results", () => {
 
     const nudged = await callTool(installation.apiToken, "project_list", {});
     expect(nudged.isError).not.toBe(true);
-    // Typed consumers see exactly what they saw before: the structured
-    // result and the original text item are unchanged byte for byte.
-    expect(JSON.stringify(nudged.structuredContent))
+    // Typed consumers see exactly what they saw before: apart from the one
+    // optional nudge field, the structured result and the original text
+    // item are unchanged byte for byte.
+    const {nudge: structuredNudge, ...unchanged} = nudgedStructureSchema
+      .parse(nudged.structuredContent);
+    expect(JSON.stringify(unchanged))
       .toBe(JSON.stringify(quiet.structuredContent));
     expect(nudged.content[0]).toEqual(quiet.content[0]);
     expect(nudged.content).toHaveLength(2);
     const nudge = nudged.content[1]?.text ?? "";
+    expect(structuredNudge).toBe(nudge);
     expect(nudge.startsWith(nudgeHeading)).toBe(true);
     expect(nudge.length).toBeLessThanOrEqual(maximumNudgeCharacters);
     // Counts and ids only: the dispatch note never rides along, and no

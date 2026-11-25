@@ -52,8 +52,10 @@ v1 nudge kinds, in priority order (at most ONE block per result):
   addressed-page read on a reply or resolve. A queue in an unscanned
   project is still claimable through `dispatch_inbox`; the nudge simply
   does not count it.
-- Appended as a trailing text content item only; `structuredContent` is
-  never touched, so typed consumers are unaffected.
+- Carried in two places (ADR 0041): the optional `nudge` field of
+  `structuredContent`, which every nudged tool's output schema declares, and
+  a trailing text content item. Every other structured field and content
+  item is unchanged, so typed consumers are unaffected.
 - Never appended to error results (an actionable error is its own
   instruction) and never to `dispatch_inbox` results (that surface already
   says everything).
@@ -68,6 +70,17 @@ v1 nudge kinds, in priority order (at most ONE block per result):
   polled.
 - Native and channel tiers are untouched — their bridges already deliver.
 
+## 3a. Host presentation
+
+MCP hosts do not all show a result the same way. Claude Code hands its model
+only the serialized `structuredContent` of a result that has one and drops
+every content item; Codex hands its model the whole result; neither shows
+result `_meta`. A nudge therefore lives in a declared `structuredContent`
+field for hosts like Claude Code and keeps its trailing text item for hosts
+that show only content. `scripts/qualify-mcp-host-nudge.ts` checks the
+installed hosts live, reading what the model received from the host's own
+transcript.
+
 ## 4. Not in v1
 
 Guideline/etiquette nudges (Doop's other use) — we have no guidelines
@@ -81,7 +94,9 @@ the bridges, which need none.
 | ID | Behavior |
 | --- | --- |
 | NDG-001 | A principal with queued mailbox dispatches sees exactly one queued-work nudge on an unrelated MCP tool result; the nudge names the real count, disappears after claim, and never appears on error or `dispatch_inbox` results. |
-| NDG-002 | Nudges never cross principals: a second principal calling the same tools sees none of the first principal's counts, and `structuredContent` is byte-identical with and without a pending nudge. |
+| NDG-002 | Nudges never cross principals: a second principal calling the same tools sees none of the first principal's counts, and every structured field other than `nudge` is byte-identical with and without a pending nudge. |
+| NDG-003 | Every nudged tool advertises the optional `nudge` output field, and a pending nudge fills it in results that schema-validating clients accept. |
+| MCP-021 | Live Claude Code and Codex sessions with a queued bundle see the nudge in an ordinary tool result. |
 
 ## 6. Cost
 
