@@ -408,6 +408,20 @@ requirements:
     depends_on: [ART-002, ART-009, CMT-001]
     evidence: []
 
+  - id: ART-012
+    kind: behavior
+    behavior: Artifact and version reads name the owner and the publisher, with labels for service keys, the local API token, and former members, and Review's Details shows them.
+    owner: artifact-core
+    source: {file: decisions/0040-principal-attribution.md, anchor: decision}
+    acceptance:
+      behavior: {id: ART-012-B, description: "Artifact details, the artifact listing, the version listing, and one version name a member owner and publisher with their name and email, and a service-key publisher as its label; Review's Details shows the owner and the publisher by name with the email on hover, the label for a service-key-owned artifact, and a key's comment as the member with the key as qualifier."}
+      failure: {id: ART-012-F, description: "A service-key owner, the local API token, and a deactivated member read as labels with no raw id shown in Review and no former member's name or email served; Details says you for the viewer's own artifact."}
+    deployments: *all
+    status: implementing
+    proof_gap: ART-012-B and ART-012-F run against the local SQLite server over HTTP and in local headless Chromium against the production Review build. Resolution lives in the backend-independent application layer and reads members and keys through the existing identity repository, so no storage changed; Postgres and D1 runs are not recorded. The MCP artifact_get and artifact_version_list labels are typed but not exercised by a dedicated test. The owner on catalog cards and a mine filter are not built. No deployment-specific evidence is recorded.
+    depends_on: [ART-002, AUTH-030]
+    evidence: []
+
   - id: MAN-001
     kind: behavior
     behavior: A canonical manifest contains a sorted list of normalized paths, fingerprints, sizes, media types, disposition, entry file, routing mode, and serving metadata.
@@ -1869,6 +1883,20 @@ requirements:
     depends_on: [AUTH-008, AUTH-030, AUTH-035]
     evidence: []
 
+  - id: AUTH-041
+    kind: security
+    behavior: Owner and publisher attribution reveals a member's email only to readers who are people; a service key reads names without emails.
+    owner: authorization
+    source: {file: decisions/0040-principal-attribution.md, anchor: decision}
+    acceptance:
+      behavior: {id: AUTH-041-B, description: "A member's personal key reads another member's artifact and receives the owner's name and email."}
+      failure: {id: AUTH-041-F, description: "A service key reads the same artifact and receives the owner's and the publisher's names with email null."}
+    deployments: *all
+    status: implementing
+    proof_gap: AUTH-041-B and AUTH-041-F run against the local SQLite server through a stub OIDC provider; the rule lives in the backend-independent application layer. MCP labels carry no email by construction and are not separately tested. No deployment-specific evidence is recorded.
+    depends_on: [AUTH-030, AUTH-034]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.
@@ -2830,6 +2858,20 @@ requirements:
     status: implementing
     proof_gap: CMT-027-B and CMT-027-F drive the production Review build in headless Chromium against HTML versions, where the review frame reports placement. Firefox, WebKit, and deployment-specific evidence are not recorded.
     depends_on: [CMT-014, CMT-015]
+    evidence: []
+
+  - id: CMT-028
+    kind: behavior
+    behavior: Threads, replies, resolutions, and sends written through a member-bound API key show the member with the key as a qualifier; a service key keeps its own kind whatever it is called; records written before keep the name captured then.
+    owner: artifact-comments
+    source: {file: decisions/0040-principal-attribution.md, anchor: decision}
+    acceptance:
+      behavior: {id: CMT-028-B, description: "Through a member's personal key named laptop, a thread, a reply, a resolution, and a dispatch are signed Member Name · laptop with the member's principal id, while the same member writing from Review is signed with their name alone."}
+      failure: {id: CMT-028-F, description: "A service key named after a member keeps principalKind service and a service: principal id; after the member is deactivated, their key cannot write a comment."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-028-B and CMT-028-F run against the local SQLite server through a stub OIDC provider, and ART-012-B shows a key's comment in Review in local headless Chromium. Threads, replies, resolutions, and sends written through a key before this change keep the key's name; they are deliberately not rewritten (ADR 0040), so no test proves their display changed. The rendered bundle message reads the captured sender name through an unchanged template and is not driven through an agent claim here. No deployment-specific evidence is recorded.
+    depends_on: [CMT-001, AUTH-034, AUTH-039]
     evidence: []
 
   - id: ADM-001

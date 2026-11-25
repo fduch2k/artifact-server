@@ -107,6 +107,7 @@ import {
   type ArtifactActionPage,
   type ArtifactDeletion,
   type ArtifactPage,
+  type ArtifactRecord,
   type ArtifactState,
   type ArtifactVersion,
   commentThreadStates,
@@ -123,6 +124,7 @@ import {
   type VersionRecord,
 } from "../core/model.js";
 import { defaultAgentSkillSource } from "../core/agent-skill.js";
+import type {PrincipalAttribution} from "../core/principal-attribution.js";
 import type { BlobStore } from "../core/ports.js";
 import {
   disabledGitHistoryCapability,
@@ -1691,11 +1693,12 @@ export function createHttpApp(
       ...context.req.query(),
       tags: context.req.queries("tag") ?? [],
     });
-    const page = await runHttpApplicationEffect(
+    const listed = await runHttpApplicationEffect(
       context,
       dependencies,
-      ArtifactManagementService.use((management) =>
-        management.listArtifacts({
+      Effect.gen(function*() {
+        const management = yield* ArtifactManagementService;
+        const page = yield* management.listArtifacts({
           comments: query.comments,
           cursor: decodePageCursor(query.cursor),
           limit: query.limit,
@@ -1704,12 +1707,18 @@ export function createHttpApp(
           search: query.search ?? null,
           sort: query.sort,
           tags: query.tags,
-        })
-      ),
+        });
+        const attributions = yield* attributeReadPrincipals(
+          context.get("principal"),
+          page.items.map((artifact) => artifact.ownerPrincipalId),
+        );
+        return {attributions, page};
+      }),
     );
     return context.json(artifactPageResponse(
       responseApplicationUrl(context, dependencies),
-      page,
+      listed.page,
+      listed.attributions,
     ));
   });
 
@@ -1735,7 +1744,14 @@ export function createHttpApp(
             projectId: details.artifact.projectId,
           })
           : null;
-        return {binding, details};
+        const attributions = yield* attributeReadPrincipals(
+          context.get("principal"),
+          [
+            details.artifact.ownerPrincipalId,
+            details.current.version.publisherPrincipalId,
+          ],
+        );
+        return {attributions, binding, details};
       }),
     );
     const requestUrl = responseApplicationUrl(context, dependencies);
@@ -1743,6 +1759,7 @@ export function createHttpApp(
       requestUrl,
       dependencies.contentDomain,
       read.details,
+      read.attributions,
     );
     if (read.binding === null) return context.json(response);
     const live = liveLink(requestUrl, dependencies, read.details.artifact.id);
@@ -1754,24 +1771,31 @@ export function createHttpApp(
   });
 
   app.get("/api/v1/artifacts/:artifactId/versions", async (context) => {
-    const versions = await runHttpApplicationEffect(
+    const listed = await runHttpApplicationEffect(
       context,
       dependencies,
-      ArtifactManagementService.use((management) =>
-        management.listVersions({
+      Effect.gen(function*() {
+        const management = yield* ArtifactManagementService;
+        const versions = yield* management.listVersions({
           artifactId: context.req.param("artifactId"),
           principal: context.get("principal"),
           projectId: requestedProjectId(context),
-        })
-      ),
+        });
+        const attributions = yield* attributeReadPrincipals(
+          context.get("principal"),
+          versions.map((version) => version.publisherPrincipalId),
+        );
+        return {attributions, versions};
+      }),
     );
     const requestUrl = responseApplicationUrl(context, dependencies);
     return context.json({
       artifactId: context.req.param("artifactId"),
-      versions: versions.map((version) => versionResponse(
+      versions: listed.versions.map((version) => versionResponse(
         requestUrl,
         dependencies.contentDomain,
         version,
+        listed.attributions.get(version.publisherPrincipalId),
       )),
     });
   });
@@ -1797,22 +1821,29 @@ export function createHttpApp(
   app.get(
     "/api/v1/artifacts/:artifactId/versions/:versionId",
     async (context) => {
-      const saved = await runHttpApplicationEffect(
+      const read = await runHttpApplicationEffect(
         context,
         dependencies,
-        ArtifactManagementService.use((management) =>
-          management.getVersion({
+        Effect.gen(function*() {
+          const management = yield* ArtifactManagementService;
+          const saved = yield* management.getVersion({
             artifactId: context.req.param("artifactId"),
             principal: context.get("principal"),
             projectId: requestedProjectId(context),
             versionId: context.req.param("versionId"),
-          })
-        ),
+          });
+          const attributions = yield* attributeReadPrincipals(
+            context.get("principal"),
+            [saved.version.publisherPrincipalId],
+          );
+          return {attributions, saved};
+        }),
       );
       return context.json(artifactVersionResponse(
         responseApplicationUrl(context, dependencies),
         dependencies.contentDomain,
-        saved,
+        read.saved,
+        read.attributions.get(read.saved.version.publisherPrincipalId),
       ));
     },
   );
@@ -3235,14 +3266,45 @@ function linkedPublicationResponse(
   };
 }
 
+/**
+ * Resolve owner and publisher ids for a read response; ids that are absent
+ * (an artifact from before owners were recorded) are skipped.
+ */
+function attributeReadPrincipals(
+  reader: Principal,
+  principalIds: readonly (string | null)[],
+) {
+  return InstallationAccessService.use((access) =>
+    access.attributePrincipals(
+      reader,
+      principalIds.filter((id): id is string => id !== null),
+    )
+  );
+}
+
+function ownerAttribution(
+  artifact: Pick<ArtifactRecord, "ownerPrincipalId">,
+  attributions: ReadonlyMap<string, PrincipalAttribution>,
+): PrincipalAttribution | null {
+  return artifact.ownerPrincipalId === null
+    ? null
+    : attributions.get(artifact.ownerPrincipalId) ?? null;
+}
+
 function artifactDetailsResponse(
   requestUrl: URL,
   contentDomain: string,
   details: ArtifactDetails,
+  attributions: ReadonlyMap<string, PrincipalAttribution>,
 ) {
   return {
     artifact: details.artifact,
-    current: artifactVersionResponse(requestUrl, contentDomain, details.current),
+    current: artifactVersionResponse(
+      requestUrl,
+      contentDomain,
+      details.current,
+      attributions.get(details.current.version.publisherPrincipalId),
+    ),
     links: {
       artifact: artifactBrowserUrl(requestUrl, details.artifact.id),
       management: new URL(
@@ -3250,12 +3312,14 @@ function artifactDetailsResponse(
         requestUrl,
       ).toString(),
     },
+    owner: ownerAttribution(details.artifact, attributions),
   };
 }
 
 function artifactPageResponse(
   requestUrl: URL,
   page: ArtifactPage,
+  attributions: ReadonlyMap<string, PrincipalAttribution>,
 ) {
   return {
     artifacts: page.items.map(({commentCount, versionCount, ...artifact}) => ({
@@ -3268,6 +3332,7 @@ function artifactPageResponse(
           requestUrl,
         ).toString(),
       },
+      owner: ownerAttribution(artifact, attributions),
       versionCount,
     })),
     nextCursor: encodePageCursor(page.nextCursor),
@@ -3589,6 +3654,7 @@ function artifactVersionResponse(
   requestUrl: URL,
   contentDomain: string,
   saved: ArtifactVersion,
+  publisher?: PrincipalAttribution,
 ) {
   return {
     manifest: {
@@ -3597,16 +3663,29 @@ function artifactVersionResponse(
       entryPath: saved.manifest.entryPath,
       routingMode: saved.manifest.routingMode,
     },
-    ...versionResponse(requestUrl, contentDomain, saved.version),
+    ...versionResponse(requestUrl, contentDomain, saved.version, publisher),
   };
 }
 
+/** One version as the HTTP API returns it. */
+interface VersionResponse {
+  links: {review: string; version: string};
+  /** Who published the version; present on read endpoints only. */
+  publisher?: PrincipalAttribution;
+  version: VersionRecord;
+}
+
+/**
+ * One version for a response. Read endpoints pass who published it; write
+ * responses answer the caller, who just published or restored it themselves.
+ */
 function versionResponse(
   requestUrl: URL,
   contentDomain: string,
   version: VersionRecord,
+  publisher?: PrincipalAttribution,
 ) {
-  return {
+  const response: VersionResponse = {
     links: {
       review: artifactReviewUrl(
         requestUrl,
@@ -3622,6 +3701,8 @@ function versionResponse(
     },
     version,
   };
+  if (publisher !== undefined) response.publisher = publisher;
+  return response;
 }
 
 function artifactStateResponse(

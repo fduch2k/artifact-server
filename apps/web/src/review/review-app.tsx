@@ -50,6 +50,7 @@ import {
   type ArtifactDetails,
   type ArtifactPage,
   type ArtifactVersion,
+  type PrincipalAttribution,
   type Project,
   type Session,
   type Version,
@@ -684,6 +685,7 @@ function ArtifactReview({
       artifact: details.artifact,
       commentCount: comments.threads.length,
       links: details.links,
+      owner: details.owner,
       versionCount: versions.length,
     }, ...items];
   }, [
@@ -2014,6 +2016,7 @@ function ArtifactReview({
                 canManage={canManageSelectedArtifact}
                 details={details}
                 linkedArtifacts={session.capabilities.linkedArtifacts}
+                viewerPrincipalId={session.principal.id}
                 onCapture={captureLinkedArtifact}
                 onOpenLive={openLinkedArtifact}
                 onTagsChange={changeTags}
@@ -2134,6 +2137,7 @@ function DetailsInspector({
   onTagsChange,
   onTombstone,
   version,
+  viewerPrincipalId,
 }: {
   readonly canManage: boolean;
   readonly details: ArtifactDetails;
@@ -2143,14 +2147,24 @@ function DetailsInspector({
   readonly onTagsChange: (tags: readonly string[]) => Promise<void>;
   readonly onTombstone: () => Promise<boolean>;
   readonly version: ArtifactVersion;
+  readonly viewerPrincipalId: string;
 }) {
+  const owner = details.owner;
+  const publisher = version.publisher;
   const linkedDriftDescription = details.sourceBinding === undefined
     ? null
     : sourceDriftDescription(details.sourceBinding.status, "captured");
   return (
     <div className="as-inspector-stack">
-      <InspectorSection count={5} title="Artifact">
+      <InspectorSection count={owner === null ? 5 : 6} title="Artifact">
         <InspectorRow label="name" title={details.artifact.name} value={details.artifact.name} />
+        {owner === null ? null : (
+          <InspectorRow
+            label="owner"
+            title={principalTitle(owner)}
+            value={principalName(owner, viewerPrincipalId)}
+          />
+        )}
         <InspectorRow
           label="access"
           value={<AccessPill access={details.artifact.accessSetting} />}
@@ -2159,9 +2173,16 @@ function DetailsInspector({
         <InspectorRow label="artifact id" mono title={details.artifact.id} value={details.artifact.id} />
         <InspectorRow label="project id" mono title={details.artifact.projectId} value={details.artifact.projectId} />
       </InspectorSection>
-      <InspectorSection count={5} title="Version">
+      <InspectorSection count={publisher === undefined ? 5 : 6} title="Version">
         <InspectorRow label="number" title={String(version.version.number)} value={String(version.version.number)} />
         <InspectorRow label="saved" title={formatTimestamp(version.version.createdAt)} value={formatTimestamp(version.version.createdAt)} />
+        {publisher === undefined ? null : (
+          <InspectorRow
+            label="published by"
+            title={principalTitle(publisher)}
+            value={principalName(publisher, viewerPrincipalId)}
+          />
+        )}
         <InspectorRow label="entry" mono title={version.manifest.entryPath} value={version.manifest.entryPath} />
         <InspectorRow label="routing" title={version.version.routingMode} value={version.version.routingMode} />
         <InspectorRow label="version id" mono title={version.version.id} value={version.version.id} />
@@ -2612,6 +2633,23 @@ function InspectorSection({
       <div className="as-inspector-section__body">{children}</div>
     </section>
   );
+}
+
+/** What Details shows for an owner or publisher: "you", a name, or a label. */
+function principalName(
+  attribution: PrincipalAttribution,
+  viewerPrincipalId: string,
+): string {
+  if (attribution.principalId === viewerPrincipalId) return "you";
+  return attribution.label;
+}
+
+/** The hover text: a member's email, or the raw id behind a label. */
+function principalTitle(attribution: PrincipalAttribution): string {
+  if (attribution.kind === "member") {
+    return attribution.email ?? attribution.displayName;
+  }
+  return attribution.principalId;
 }
 
 function InspectorRow({

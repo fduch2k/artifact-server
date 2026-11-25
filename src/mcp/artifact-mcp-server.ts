@@ -10,7 +10,7 @@ import {
   type ToolAnnotations,
   type ToolCallback,
 } from "@modelcontextprotocol/server";
-import {type Effect, Redacted} from "effect";
+import {Effect, Redacted} from "effect";
 import {z} from "zod";
 
 import {AgentDispatchService} from "../application/agent-dispatch.js";
@@ -26,6 +26,7 @@ import {
   type UpdateCommentThreadCommand,
 } from "../application/artifact-comments.js";
 import {ArtifactManagementService} from "../application/artifact-management.js";
+import {InstallationAccessService} from "../application/installation-access.js";
 import {CompareArtifactService} from "../application/compare-artifact.js";
 import {ContentAccessService} from "../application/content-access.js";
 import {
@@ -62,6 +63,7 @@ import {
   type StagedUpload,
 } from "../core/model.js";
 import {principalKinds, type Principal} from "../core/identity.js";
+import type {PrincipalAttribution} from "../core/principal-attribution.js";
 import {
   gitHistoryProviders,
   gitHistoryProviderStates,
@@ -936,34 +938,55 @@ export function createArtifactMcpServer(
             version: z.url(),
           }).strict(),
           manifest: manifestProjectionSchema,
+          publisherDisplayName: z.string(),
           version: versionRecordSchema,
         }).strict(),
         links: z.object({artifact: z.url()}).strict(),
+        ownerDisplayName: z.string().nullable(),
       }).strict(),
       annotations: readOnlyAnnotations,
     },
     async ({artifactId, projectId}) => toolResult(async () => {
-      const details = await runMcpApplicationEffect(
+      const {attributions, details} = await runMcpApplicationEffect(
         dependencies,
-        ArtifactManagementService.use((management) =>
-          management.getArtifact({
+        Effect.gen(function*() {
+          const management = yield* ArtifactManagementService;
+          const read = yield* management.getArtifact({
             artifactId,
             principal: identity.principal,
             projectId,
-          })
-        ),
+          });
+          const access = yield* InstallationAccessService;
+          const owners = read.artifact.ownerPrincipalId === null
+            ? []
+            : [read.artifact.ownerPrincipalId];
+          return {
+            attributions: yield* access.attributePrincipals(identity.principal, [
+              ...owners,
+              read.current.version.publisherPrincipalId,
+            ]),
+            details: read,
+          };
+        }),
       );
+      const publisherId = details.current.version.publisherPrincipalId;
       return {
         artifact: details.artifact,
-        current: versionProjection(
-          applicationUrl,
-          dependencies.contentDomain,
-          details.artifact.id,
-          details.current,
-        ),
+        current: {
+          ...versionProjection(
+            applicationUrl,
+            dependencies.contentDomain,
+            details.artifact.id,
+            details.current,
+          ),
+          publisherDisplayName: attributionLabel(attributions, publisherId),
+        },
         links: {
           artifact: artifactBrowserUrl(applicationUrl, details.artifact.id),
         },
+        ownerDisplayName: details.artifact.ownerPrincipalId === null
+          ? null
+          : attributionLabel(attributions, details.artifact.ownerPrincipalId),
       };
     }),
   );
@@ -1054,21 +1077,31 @@ export function createArtifactMcpServer(
           id: z.string(),
           manifestDigest: z.string(),
           number: z.number().int().positive(),
+          publisherDisplayName: z.string(),
           publisherPrincipalId: z.string(),
         }).strict()),
       }).strict(),
       annotations: readOnlyAnnotations,
     },
     async ({artifactId, projectId}) => toolResult(async () => {
-      const versions = await runMcpApplicationEffect(
+      const {attributions, versions} = await runMcpApplicationEffect(
         dependencies,
-        ArtifactManagementService.use((management) =>
-          management.listVersions({
+        Effect.gen(function*() {
+          const management = yield* ArtifactManagementService;
+          const listed = yield* management.listVersions({
             artifactId,
             principal: identity.principal,
             projectId,
-          })
-        ),
+          });
+          const access = yield* InstallationAccessService;
+          return {
+            attributions: yield* access.attributePrincipals(
+              identity.principal,
+              listed.map((version) => version.publisherPrincipalId),
+            ),
+            versions: listed,
+          };
+        }),
       );
       return {
         artifactId,
@@ -1083,6 +1116,10 @@ export function createArtifactMcpServer(
           id: version.id,
           manifestDigest: version.manifestDigest,
           number: version.number,
+          publisherDisplayName: attributionLabel(
+            attributions,
+            version.publisherPrincipalId,
+          ),
           publisherPrincipalId: version.publisherPrincipalId,
         })),
       };
@@ -2798,4 +2835,12 @@ function decodePageCursor(token: string | null): {readonly createdAt: string; re
 
 function variableString(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+/** The display label of one resolved owner or publisher id. */
+function attributionLabel(
+  attributions: ReadonlyMap<string, PrincipalAttribution>,
+  principalId: string,
+): string {
+  return attributions.get(principalId)?.label ?? principalId;
 }

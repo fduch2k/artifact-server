@@ -10,6 +10,13 @@ import {
 } from "./authentication-cache.js";
 import type {AgentOwner} from "../core/agent-reach.js";
 import {
+  attributePrincipal,
+  memberKeyDisplayName,
+  type PrincipalAttribution,
+  type PrincipalDirectorySnapshot,
+  servicePrincipalIdPrefix,
+} from "../core/principal-attribution.js";
+import {
   AuthenticationRequired,
   AuthorizationDenied,
   IdentityAdmissionDenied,
@@ -340,6 +347,18 @@ export interface InstallationAccessOperations {
   readonly resolveAgentOwners: (
     principalIds: readonly string[],
   ) => Effect.Effect<ReadonlyMap<string, AgentOwner>, IdentityRepositoryFailure>;
+  /**
+   * Who stands behind each owner or publisher id, for display: an active
+   * member by name, otherwise a label. Members' emails reach only readers
+   * who may see the member directory.
+   */
+  readonly attributePrincipals: (
+    reader: Principal,
+    principalIds: readonly string[],
+  ) => Effect.Effect<
+    ReadonlyMap<string, PrincipalAttribution>,
+    IdentityRepositoryFailure
+  >;
   /** One active member of this installation, checked before sharing with them. */
   readonly findActiveMember: (
     memberId: string,
@@ -711,10 +730,20 @@ function makeInstallationAccessService(
     ) {
       return yield* invalidApiKey();
     }
+    // A member-bound key writes as the member, qualified by the key, so a
+    // reader sees both the person and the agent acting for them.
+    const member = key.principalKind === principalKinds.human
+      ? yield* dependencies.repository.findMember(
+        dependencies.installationId,
+        key.principalId,
+      )
+      : null;
     const principal: Principal = {
       authorizedByPrincipalId: key.authorizedByPrincipalId,
       capabilities: key.capabilities,
-      displayName: key.name,
+      displayName: member?.status === memberStatuses.active
+        ? memberKeyDisplayName(member.displayName, key.name)
+        : key.name,
       id: key.principalId,
       installationId: key.installationId,
       kind: key.principalKind,
@@ -788,6 +817,39 @@ function makeInstallationAccessService(
           : {kind: "former-member", principalId},
       ];
     }));
+  });
+
+  const attributePrincipals = Effect.fn(
+    "InstallationAccessService.attributePrincipals",
+  )(function*(reader: Principal, principalIds: readonly string[]) {
+    const unique = [...new Set(principalIds)];
+    if (unique.length === 0) return new Map<string, PrincipalAttribution>();
+    const needsKeys = unique.some((id) => id.startsWith(servicePrincipalIdPrefix));
+    const [members, keys] = yield* Effect.all([
+      dependencies.repository.listMembers(dependencies.installationId),
+      needsKeys
+        ? dependencies.repository.listApiKeys(dependencies.installationId)
+        : Effect.succeed([]),
+    ], {concurrency: 2});
+    const directory: PrincipalDirectorySnapshot = {
+      members: new Map(members.map((member) => [member.id, {
+        active: member.status === memberStatuses.active,
+        displayName: member.displayName,
+        email: member.email,
+      }])),
+      serviceKeyNames: new Map(
+        keys
+          .filter((key) => key.principalKind === principalKinds.service)
+          .map((key) => [key.principalId, key.name]),
+      ),
+    };
+    // The same rule as the member directory: people see people's emails.
+    const includeEmail = reader.installationId === dependencies.installationId &&
+      reader.kind === principalKinds.human;
+    return new Map(unique.map((principalId) => [
+      principalId,
+      attributePrincipal(principalId, directory, includeEmail),
+    ]));
   });
 
   const findActiveMember = Effect.fn(
@@ -1077,6 +1139,7 @@ function makeInstallationAccessService(
     issueLocalBrowserLogin,
     issuePersonalApiKey,
     loginAsLocalOwner,
+    attributePrincipals,
     findActiveMember,
     listApiKeys,
     listMemberDirectory,
