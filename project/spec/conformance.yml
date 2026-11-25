@@ -2762,6 +2762,48 @@ requirements:
     depends_on: [CMT-014, CMT-015]
     evidence: []
 
+  - id: CMT-025
+    kind: behavior
+    behavior: Review's Resolved and All views are explicit filters that list threads an agent addressed with their replies, and Review's comment count for the artifact equals All, while the comment listing's default keeps excluding dispatched threads.
+    owner: artifact-comments
+    source: {file: artifact-comments-spec.md, anchor: review-thread-views}
+    acceptance:
+      behavior: {id: CMT-025-B, description: "A mailbox agent claims, delivers, replies to, and resolves three of a version's four threads; Review lists the unsent thread under Open, the three under Resolved with the agent's replies, all four under All and in the artifact list's count, and the three under Sent as Addressed."}
+      failure: {id: CMT-025-F, description: "The API's default listing still returns only the unsent thread; reopening an addressed thread puts it back in Open and in Send all open exactly once, and All and the count stay at four."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-025-B and CMT-025-F drive the production Review build over a real local server and SQLite in headless Chromium. Firefox, WebKit, and deployment-specific evidence are not recorded. A dispatch released by cancel or failure without a thread change shows in Review on its next load or on the next poll that finds a changed thread.
+    depends_on: [DSP-008, DSP-009, CMT-019]
+    evidence: []
+
+  - id: CMT-026
+    kind: behavior
+    behavior: When Review's Open view is empty because its open threads went to agents, it says how many were sent and links to Sent instead of calling the version resolved; the sent threads stay off the page and out of the next send.
+    owner: artifact-comments
+    source: {file: artifact-comments-spec.md, anchor: review-thread-views}
+    acceptance:
+      behavior: {id: CMT-026-B, description: "With one thread resolved, Send all open (3) to a mailbox agent; the empty Open view reads 'Nothing open. 3 sent to agents — see Sent.', and its link opens Sent with the three threads."}
+      failure: {id: CMT-026-F, description: "The sent threads draw no marker on the page, Send all open counts zero and is disabled, All lists them without a Send control, and once every thread is resolved and none is held the Open view says all comments are resolved."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-026-B and CMT-026-F drive the production Review build over a real local server and SQLite in headless Chromium. Firefox, WebKit, and deployment-specific evidence are not recorded.
+    depends_on: [CMT-025, DSP-009]
+    evidence: []
+
+  - id: CMT-027
+    kind: behavior
+    behavior: Review warns that a thread's location is unavailable only when the thread carries a Review anchor that cannot be placed in the version; whole-version threads and threads anchored in another client's format show no warning.
+    owner: artifact-comments
+    source: {file: artifact-comments-spec.md, anchor: review-thread-views}
+    acceptance:
+      behavior: {id: CMT-027-B, description: "A Review anchor whose element and text are missing from the HTML version shows 'Location unavailable in this version' on its card, and a placeable Review anchor draws its marker without the warning."}
+      failure: {id: CMT-027-F, description: "A whole-version thread with a null anchor, a page thread with a null anchor, and a page thread with an opaque API anchor show no warning, and the whole-version thread still reads 'Whole version'."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-027-B and CMT-027-F drive the production Review build in headless Chromium against HTML versions, where the review frame reports placement. Firefox, WebKit, and deployment-specific evidence are not recorded.
+    depends_on: [CMT-014, CMT-015]
+    evidence: []
+
   - id: ADM-001
     kind: behavior
     behavior: Artifact Server ships one canonical React application for Review and settings, plus the isolated Review frame; every former application route redirects to the equivalent canonical destination without serving or loading a legacy application bundle.

@@ -2512,6 +2512,22 @@ select:focus-visible {
   margin: 0.25rem 0;
 }
 
+.as-inspector-empty__link {
+  background: none;
+  border: 0;
+  color: var(--as-text);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.as-inspector-empty__link:focus-visible {
+  outline: 2px solid var(--as-iris);
+  outline-offset: 2px;
+}
+
 .as-inspector-error {
   color: var(--as-love);
   font-size: 0.75rem;

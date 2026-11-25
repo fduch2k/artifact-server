@@ -632,9 +632,7 @@ function ArtifactReview({
       ...new Set([...current, ...details.artifact.tags]),
     ].toSorted());
   }, [details]);
-  const openCommentCount = comments.threads.filter(
-    (thread) => thread.state === "open",
-  ).length;
+  const openCommentCount = comments.openThreads.length;
 
   // Browser agent tools (WebMCP): the ref hands the adapter live view state
   // each render; registration itself lives entirely in webmcp.tsx.
@@ -654,7 +652,8 @@ function ArtifactReview({
     projectId,
     projectName: projects.find((project) => project.id === projectId)?.name ?? null,
     replies: comments.repliesByThread,
-    threads: comments.threads,
+    // Browser agents keep the server's default listing: sent threads hidden.
+    threads: comments.undispatchedThreads,
     version: selectedVersion === null ? null : {
       createdAt: selectedVersion.version.createdAt,
       id: selectedVersion.version.id,
