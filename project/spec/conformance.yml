@@ -2776,6 +2776,20 @@ requirements:
     depends_on: [DSP-008, DSP-009, CMT-019]
     evidence: []
 
+  - id: CMT-026
+    kind: behavior
+    behavior: When Review's Open view is empty because its open threads went to agents, it says how many were sent and links to Sent instead of calling the version resolved; the sent threads stay off the page and out of the next send.
+    owner: artifact-comments
+    source: {file: artifact-comments-spec.md, anchor: review-thread-views}
+    acceptance:
+      behavior: {id: CMT-026-B, description: "With one thread resolved, Send all open (3) to a mailbox agent; the empty Open view reads 'Nothing open. 3 sent to agents — see Sent.', and its link opens Sent with the three threads."}
+      failure: {id: CMT-026-F, description: "The sent threads draw no marker on the page, Send all open counts zero and is disabled, All lists them without a Send control, and once every thread is resolved and none is held the Open view says all comments are resolved."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-026-B and CMT-026-F drive the production Review build over a real local server and SQLite in headless Chromium. Firefox, WebKit, and deployment-specific evidence are not recorded.
+    depends_on: [CMT-025, DSP-009]
+    evidence: []
+
   - id: ADM-001
     kind: behavior
     behavior: Artifact Server ships one canonical React application for Review and settings, plus the isolated Review frame; every former application route redirects to the equivalent canonical destination without serving or loading a legacy application bundle.

@@ -692,6 +692,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
   const openThreads = session.openThreads;
   const allOpenThreads = session.threads.filter((thread) => thread.state === "open");
   const resolvedThreads = session.threads.filter((thread) => thread.state === "resolved");
+  const sentOpenCount = allOpenThreads.length - openThreads.length;
   const visibleThreads = view === "sent"
     ? sentThreads
     : view === "all"
@@ -793,15 +794,30 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
         <p className="as-inspector-empty">Loading comments…</p>
       ) : null}
       {!loadingVisible && visibleThreads.length === 0 ? (
-        <p className="as-inspector-empty">
-          {view === "all"
-            ? "No comments on this version yet."
-            : view === "sent"
-              ? "No sent comments on this version."
-              : view === "open" && resolvedThreads.length > 0
-                ? "All comments on this version are resolved."
-                : `No ${view} comments on this version.`}
-        </p>
+        view === "open" && sentOpenCount > 0 ? (
+          // Open threads that went to agents are not resolved: say where they are.
+          <p className="as-inspector-empty">
+            Nothing open. {sentOpenCount} sent to {sentOpenCount === 1 ? "an agent" : "agents"}
+            {" — "}
+            <button
+              className="as-inspector-empty__link"
+              onClick={() => setView("sent")}
+              type="button"
+            >
+              see Sent
+            </button>.
+          </p>
+        ) : (
+          <p className="as-inspector-empty">
+            {view === "all"
+              ? "No comments on this version yet."
+              : view === "sent"
+                ? "No sent comments on this version."
+                : view === "open" && resolvedThreads.length > 0
+                  ? "All comments on this version are resolved."
+                  : `No ${view} comments on this version.`}
+          </p>
+        )
       ) : null}
       <ol className="as-comment-list">
         {visibleThreads.map((thread) => {

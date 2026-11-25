@@ -161,4 +161,66 @@ test.describe("Review thread views", () => {
     }
   });
 
+  test("CMT-026-B CMT-026-F: an empty Open view points to threads sent to agents instead of calling them resolved", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser);
+    try {
+      const published = await publishFixture(fixture, "cmt-026");
+      const threads = await Promise.all(["one", "two", "three", "four"].map((word) =>
+        createThreadOverApi(fixture, {
+          anchor: null,
+          artifactId: published.artifact.id,
+          body: `Thread ${word}`,
+          idempotencyKey: `cmt-026-thread-${word}`,
+          path: "index.html",
+          versionId: published.version.id,
+        })
+      ));
+      const resolved = threads[3];
+      if (resolved === undefined) throw new Error("The resolved thread is missing.");
+      const owner = new ApiClient(fixture.server, fixture.installation.apiToken);
+      expect((await owner.setThreadState(published, resolved.id, "resolved")).status)
+        .toBe(200);
+      await connectMailboxAgent(fixture, "builder");
+
+      const page = await openComments(fixture, published.artifact.id, published.version.id);
+      await page.getByRole("button", {name: "Send all open (3) to builder"}).click();
+      await expect(page.getByText(/^Queued for builder/u)).toBeVisible();
+      await expect(cards(page)).toHaveCount(0);
+      const empty = page.locator(".as-comments > .as-inspector-empty");
+      await expect(empty).toHaveText("Nothing open. 3 sent to agents — see Sent.");
+      await expect(page.getByText("All comments on this version are resolved."))
+        .toHaveCount(0);
+
+      // Queued threads stay off the page and out of the next send, yet All lists them.
+      const preview = page.frameLocator(".as-artifact-frame").frameLocator("iframe");
+      await expect(preview.locator("button[data-plannotator-marker]")).toHaveCount(0);
+      await expect(page.getByRole("button", {name: "Send all open (0) to builder"}))
+        .toBeDisabled();
+      await filter(page, "All").click();
+      await expect(cards(page)).toHaveCount(4);
+      await Promise.all(threads.slice(0, 3).map((thread) =>
+        expect(cards(page).filter({hasText: thread.body}).getByRole("button", {
+          name: /^Send/u,
+        })).toHaveCount(0)
+      ));
+
+      await filter(page, "Open").click();
+      await empty.getByRole("button", {name: "see Sent"}).click();
+      await expect(filter(page, "Sent (3)")).toHaveAttribute("aria-pressed", "true");
+      await expect(cards(page)).toHaveCount(3);
+
+      // With nothing sent and everything resolved, the old wording still holds.
+      await filter(page, "Open").click();
+      await expect(empty).toContainText("Nothing open. 3 sent to agents");
+      const resolutions = await Promise.all(threads.slice(0, 3).map((thread) =>
+        owner.setThreadState(published, thread.id, "resolved")
+      ));
+      expect(resolutions.map((response) => response.status)).toEqual([200, 200, 200]);
+      await page.getByRole("button", {name: "Reload"}).click();
+      await expect(empty).toHaveText("All comments on this version are resolved.");
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
 });

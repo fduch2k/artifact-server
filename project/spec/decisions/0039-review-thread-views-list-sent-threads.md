@@ -43,6 +43,8 @@ with `dispatched=only`, and derives its views from the two:
   state.
 
 The comment count Review shows for the selected artifact is the size of All.
+When Open is empty because its threads went to agents, it says so and links to
+Sent ("Nothing open. 3 sent to agents — see Sent.").
 
 **The API default stays.** `comment_list` and `GET …/comments` still exclude
 dispatched threads unless asked. Agents and integrations read that default as

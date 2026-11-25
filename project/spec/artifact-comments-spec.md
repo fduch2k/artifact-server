@@ -401,6 +401,9 @@ the comment count Review shows for the artifact equals it. Sent lists the
 threads a dispatch holds with their dispatch state. The comment listing's own
 default, which excludes dispatched threads, does not change.
 
+When Open is empty because its threads went to agents, it says how many were
+sent and links to Sent instead of calling the version resolved.
+
 ### Dispatch-bound comment deletion
 
 A dispatch package is an immutable delivery and audit record. A comment thread
