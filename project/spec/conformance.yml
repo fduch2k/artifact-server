@@ -3426,11 +3426,11 @@ requirements:
 
   - id: NDG-002
     kind: behavior
-    behavior: Nudges never alter the underlying tool result and never cross principals. Structured content and existing content items are byte-identical with and without a pending nudge, the nudge is one bounded sanitized trailing item, and a second principal sees none of the first principal's counts.
+    behavior: Nudges never alter the underlying tool result and never cross principals. Every structured field other than the optional nudge field and every existing content item is byte-identical with and without a pending nudge, the nudge is one bounded sanitized value carried in that field and one trailing item, and a second principal sees none of the first principal's counts.
     owner: agent-bridge
     source: {file: tool-result-nudges-spec.md, anchor: rules}
     acceptance:
-      behavior: {id: NDG-002-B, description: "structuredContent and the pre-existing content items are byte-identical with and without a pending nudge, and the nudge is one bounded trailing text item passed through the shared sanitization."}
+      behavior: {id: NDG-002-B, description: "Every structured field other than nudge and the pre-existing content items are byte-identical with and without a pending nudge, and the nudge is one bounded value, in the nudge field and one trailing text item, passed through the shared sanitization."}
       failure: {id: NDG-002-F, description: "A second principal calling the same tools sees none of the first principal's counts, with or without a mailbox agent of its own."}
     deployments: [local]
     status: behavior_verified
@@ -3442,6 +3442,34 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-26T16:23:33.278Z"
+
+  - id: NDG-003
+    kind: behavior
+    behavior: A nudge reaches clients that show their model only structuredContent. Every nudged tool advertises an optional bounded nudge field in its output schema, a pending nudge fills it with the same block as the trailing text item, and schema-validating clients accept the result in both protocol eras.
+    owner: agent-bridge
+    source: {file: tool-result-nudges-spec.md, anchor: host-presentation}
+    acceptance:
+      behavior: {id: NDG-003-B, description: "Every nudged tool's advertised output schema has an optional nudge string of at most 400 characters, dispatch_inbox has none, a quiet result has no nudge key, and with a bundle queued an unrelated result carries the nudge in structuredContent and as the trailing text item while official modern and legacy clients validate it."}
+      failure: {id: NDG-003-F, description: "With a bundle queued, an error result and a dispatch_inbox result carry no nudge field."}
+    deployments: [local]
+    status: implementing
+    proof_gap: NDG-003-B and NDG-003-F pass locally against the official SDK clients; no deployment-specific evidence is recorded. A tool that declares its own nudge output field fails at registration, proven by a unit test rather than by a registered tool.
+    depends_on: [NDG-002]
+    evidence: []
+
+  - id: MCP-021
+    kind: behavior
+    behavior: A live Claude Code session and a live Codex session whose API key's mailbox agent has a queued review bundle see the queued-work nudge in the tool result their model receives from an ordinary tool call.
+    owner: mcp
+    source: {file: tool-result-nudges-spec.md, anchor: host-presentation}
+    acceptance:
+      behavior: {id: MCP-021-B, description: "Run scripts/qualify-mcp-host-nudge.ts with Claude Code and Codex signed in: each host calls artifact_version_list once over /mcp with one bundle queued, and the tool result recorded in the host's own transcript contains the nudge."}
+      failure: {id: MCP-021-F, description: "A host whose recorded tool result lacks the nudge fails the run, which records passed false and exits non-zero rather than inferring visibility from the model's answer; against the server before ADR 0041 the run fails on Claude Code and passes on Codex."}
+    deployments: [local]
+    status: implementing
+    proof_gap: "One manual run on November 25, 2026 with Claude Code 2.1.332 and Codex 0.169.0 recorded the nudge in both hosts' transcripts (project/evidence/mcp-host-nudge-live.json); the baseline run before the change recorded the Claude Code miss and is described in ADR 0041, not kept as a file. The run needs signed-in host CLIs and their model providers, so it is outside CI and pnpm verify:iteration; Cursor, VS Code, and later host versions are not checked."
+    depends_on: [NDG-003]
+    evidence: []
 
   - id: DRF-001
     kind: behavior

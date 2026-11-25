@@ -10,6 +10,7 @@
  */
 
 import type {CallToolResult} from "@modelcontextprotocol/server";
+import {z} from "zod";
 
 import {sanitizeBundleText} from "./dispatch-bundle-message.js";
 
@@ -98,16 +99,52 @@ export function composeToolResultNudge(
 }
 
 /**
- * Append one nudge as a trailing text content item. `structuredContent` and
- * every existing content item pass through untouched, so typed consumers see
- * exactly what they saw before.
+ * The `structuredContent` field a nudge travels in. Claude Code hands its
+ * model only the serialized `structuredContent` of a result that has one and
+ * drops every content item, so a nudge must live inside the structured value
+ * to be seen there (ADR 0041). Every nudged tool's output schema declares
+ * this field as optional, so schema-validating clients accept it.
+ */
+export const nudgeField = "nudge";
+
+/**
+ * Add the optional nudge field to one tool's output schema. A tool that
+ * already declares a field of that name would have it silently replaced, so
+ * that is a registration-time defect, not something to paper over.
+ */
+export function withNudgeField(
+  toolName: string,
+  outputSchema: z.ZodObject,
+): z.ZodObject {
+  if (outputSchema.keyof().safeParse(nudgeField).success) {
+    throw new Error(
+      `Tool ${toolName} declares the reserved output field "${nudgeField}".`,
+    );
+  }
+  return outputSchema.extend({
+    [nudgeField]: z.string().max(maximumNudgeCharacters).optional().describe(
+      "Present only when the artifact server has work waiting for the caller's own agent: one short instruction, such as claiming a queued review bundle through dispatch_inbox.",
+    ),
+  });
+}
+
+/**
+ * Attach one nudge to a successful result through both channels clients
+ * read: the `nudge` field of `structuredContent` (Claude Code shows the model
+ * only that), and a trailing text content item (for clients that show only
+ * content). Every existing structured field and content item passes through
+ * untouched.
  */
 export function appendToolResultNudge(
   result: CallToolResult,
   nudge: string,
 ): CallToolResult {
-  return {
+  const nudged: CallToolResult = {
     ...result,
     content: [...result.content, {text: nudge, type: "text"}],
   };
+  if (result.structuredContent !== undefined) {
+    nudged.structuredContent = {...result.structuredContent, [nudgeField]: nudge};
+  }
+  return nudged;
 }
