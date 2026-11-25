@@ -2762,6 +2762,20 @@ requirements:
     depends_on: [CMT-014, CMT-015]
     evidence: []
 
+  - id: CMT-025
+    kind: behavior
+    behavior: Review's Resolved and All views are explicit filters that list threads an agent addressed with their replies, and Review's comment count for the artifact equals All, while the comment listing's default keeps excluding dispatched threads.
+    owner: artifact-comments
+    source: {file: artifact-comments-spec.md, anchor: review-thread-views}
+    acceptance:
+      behavior: {id: CMT-025-B, description: "A mailbox agent claims, delivers, replies to, and resolves three of a version's four threads; Review lists the unsent thread under Open, the three under Resolved with the agent's replies, all four under All and in the artifact list's count, and the three under Sent as Addressed."}
+      failure: {id: CMT-025-F, description: "The API's default listing still returns only the unsent thread; reopening an addressed thread puts it back in Open and in Send all open exactly once, and All and the count stay at four."}
+    deployments: *all
+    status: implementing
+    proof_gap: CMT-025-B and CMT-025-F drive the production Review build over a real local server and SQLite in headless Chromium. Firefox, WebKit, and deployment-specific evidence are not recorded. A dispatch released by cancel or failure without a thread change shows in Review on its next load or on the next poll that finds a changed thread.
+    depends_on: [DSP-008, DSP-009, CMT-019]
+    evidence: []
+
   - id: ADM-001
     kind: behavior
     behavior: Artifact Server ships one canonical React application for Review and settings, plus the isolated Review frame; every former application route redirects to the equivalent canonical destination without serving or loading a legacy application bundle.

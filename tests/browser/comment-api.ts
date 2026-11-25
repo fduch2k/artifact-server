@@ -88,9 +88,12 @@ export async function createThreadOverApi(
   },
 ): Promise<CommentThread> {
   const projectId = input.projectId ?? "prj_default";
+  // An explicit null anchor is what an MCP client sends for a whole-version
+  // comment; only an omitted anchor falls back to an opaque page anchor.
+  const anchor = input.anchor === undefined ? {kind: "page"} : input.anchor;
   const draft = input.path === undefined
-    ? {anchor: input.anchor ?? {kind: "page"}, body: input.body}
-    : {anchor: input.anchor ?? {kind: "page"}, body: input.body, path: input.path};
+    ? {anchor, body: input.body}
+    : {anchor, body: input.body, path: input.path};
   const response = await fetch(
     `${fixture.server.baseUrl}/api/v1/artifacts/${input.artifactId}/versions/${input.versionId}/comments?projectId=${projectId}`,
     {

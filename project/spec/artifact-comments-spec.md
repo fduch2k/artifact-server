@@ -389,6 +389,18 @@ management rules. Reload and incremental polling refresh both thread summaries
 and reply bodies, so Review never shows a reply count without the corresponding
 conversation.
 
+### Review thread views
+
+Review's Open, Resolved, All, and Sent views are explicit filters over every
+thread on the selected version
+([ADR 0039](decisions/0039-review-thread-views-list-sent-threads.md)). Open
+lists open threads no dispatch holds; only these are drawn on the page and
+offered to "Send all open". Resolved lists every resolved thread, including
+threads an agent addressed, with their replies. All lists every thread, and
+the comment count Review shows for the artifact equals it. Sent lists the
+threads a dispatch holds with their dispatch state. The comment listing's own
+default, which excludes dispatched threads, does not change.
+
 ### Dispatch-bound comment deletion
 
 A dispatch package is an immutable delivery and audit record. A comment thread

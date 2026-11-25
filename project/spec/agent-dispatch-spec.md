@@ -220,7 +220,7 @@ Consumptive send, per the owner:
 - **Send controls:** a "Send to agent" action on each open annotation's card and — v1, owner decision — **"Send all open"** on a version (Comments tab version filter and the review panel header): thirty open annotations become ONE human-initiated send, split only at the server's 100-thread dispatch bound. Review does not support arbitrary multi-select bundles. Both actions use the same tier-aware agent control: connected agents with display name, working directory, and last-seen; disabled state when none are connected. Sending creates one idempotency key per dispatch and holds it across retries.
 - **On success the annotations vanish** — lists refresh under the default `dispatched=exclude`, review pins disappear with them. No status chip, badge, or progress surface appears anywhere on the artifact surfaces.
 - **The state filter gains "Sent"** (`dispatched=only`) so history is findable on demand. That view is where a queued/claimed/delivered dispatch can be canceled — cancel and failure are the single exception to "gone is gone": their threads reappear in the default views automatically because the server clears the markers.
-- The loop finishes invisibly: the agent's resolves leave the threads hidden (resolved), and reopening a thread the agent got wrong is the existing reopen action.
+- The loop finishes invisibly: the agent's resolves leave the threads out of the default listing and out of Review's Open view, and reopening a thread the agent got wrong is the existing reopen action. Review's Resolved and All views are explicit filters that list addressed threads with their replies ([ADR 0039](decisions/0039-review-thread-views-list-sent-threads.md)).
 
 ## 10. Conformance and testing
 

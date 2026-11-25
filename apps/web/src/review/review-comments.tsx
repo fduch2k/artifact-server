@@ -19,6 +19,7 @@ import {
   type CommentThread,
   type CommentThreadDetails,
   type CommentThreadQuery,
+  type DispatchedThreadFilter,
 } from "@/api/client";
 import {CommentComposer} from "@/components/comments/comment-composer";
 import {useCommentDraft} from "@/components/comments/comment-drafts";
@@ -67,7 +68,7 @@ function threadQuery(
   versionId: string,
   since: string | null,
   cursor: string | null,
-  dispatched: "exclude" | "include" | "only" | null = null,
+  dispatched: DispatchedThreadFilter | null,
 ): CommentThreadQuery {
   return {
     cursor,
@@ -84,7 +85,7 @@ async function loadAllThreads(
   artifactId: string,
   versionId: string,
   since: string | null,
-  dispatched: "exclude" | "include" | "only" | null = null,
+  dispatched: DispatchedThreadFilter | null,
   cursor: string | null = null,
   collected: readonly CommentThread[] = [],
 ): Promise<readonly CommentThread[]> {
@@ -142,8 +143,23 @@ async function loadConversations(
   });
 }
 
+/**
+ * The ids of this version's threads an active or addressed dispatch still
+ * holds. Review lists every thread explicitly and uses this set to keep sent
+ * threads out of Open, out of the page, and out of the next send.
+ */
+async function loadDispatchedThreadIds(
+  projectId: string,
+  artifactId: string,
+  versionId: string,
+): Promise<ReadonlySet<string>> {
+  const listed = await loadAllThreads(projectId, artifactId, versionId, null, "only");
+  return new Set(listed.map((thread) => thread.id));
+}
+
 export interface ReviewCommentSession {
   readonly artifactId: string | null;
+  /** Open threads drawn on the page: open and not held by a dispatch. */
   readonly annotations: readonly ReviewAnnotation[];
   readonly changeState: (thread: CommentThread) => Promise<void>;
   readonly createReply: (
@@ -152,8 +168,12 @@ export interface ReviewCommentSession {
     idempotencyKey: string,
   ) => Promise<boolean>;
   readonly deleteReply: (reply: CommentReply) => Promise<void>;
+  /** Threads held by a dispatch; addressed threads stay here while resolved. */
+  readonly dispatchedThreadIds: ReadonlySet<string>;
   readonly error: Error | null;
   readonly loading: boolean;
+  /** Open threads still in this reviewer's hands: open and not sent. */
+  readonly openThreads: readonly CommentThread[];
   readonly projectId: string;
   readonly reload: () => Promise<void>;
   readonly repliesByThread: ReadonlyMap<string, readonly CommentReply[]>;
@@ -164,7 +184,10 @@ export interface ReviewCommentSession {
     anchor: ReviewAnchor | null,
     path: string | null,
   ) => Promise<boolean>;
+  /** Every thread on the version, sent ones included: the All view. */
   readonly threads: readonly CommentThread[];
+  /** The threads the server's default listing returns: none held by a dispatch. */
+  readonly undispatchedThreads: readonly CommentThread[];
   readonly unanchoredIds: readonly string[];
   readonly updateUnanchored: (threadIds: readonly string[]) => void;
   readonly updateReply: (reply: CommentReply, body: string) => Promise<boolean>;
@@ -183,6 +206,9 @@ export function useReviewComments({
   readonly versionId: string | null;
 }): ReviewCommentSession {
   const [threads, setThreads] = useState<readonly CommentThread[]>([]);
+  const [dispatchedThreadIds, setDispatchedThreadIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const [repliesByThread, setRepliesByThread] = useState<ReadonlyMap<
     string,
     readonly CommentReply[]
@@ -202,6 +228,7 @@ export function useReviewComments({
     reloadGenerationRef.current = generation;
     if (artifactId === null || projectId === "" || versionId === null) {
       setThreads([]);
+      setDispatchedThreadIds(new Set());
       setRepliesByThread(new Map());
       setSelectedThreadId(null);
       setUnanchoredIds([]);
@@ -212,12 +239,12 @@ export function useReviewComments({
     setError(null);
     try {
       await ownership.own(async () => {
-        const listedThreads = await loadAllThreads(
-          projectId,
-          artifactId,
-          versionId,
-          null,
-        );
+        // Review's views are explicit filters, so it lists sent threads too;
+        // the server default hides them (DSP-008, DSP-009).
+        const [listedThreads, dispatchedIds] = await Promise.all([
+          loadAllThreads(projectId, artifactId, versionId, null, "include"),
+          loadDispatchedThreadIds(projectId, artifactId, versionId),
+        ]);
         const conversations = await loadConversations(
           projectId,
           artifactId,
@@ -225,6 +252,7 @@ export function useReviewComments({
         );
         if (reloadGenerationRef.current !== generation) return;
         setThreads(conversations.map(({thread}) => thread));
+        setDispatchedThreadIds(dispatchedIds);
         setRepliesByThread(new Map(
           conversations.map(({replies, thread}) => [thread.id, replies]),
         ));
@@ -241,6 +269,7 @@ export function useReviewComments({
 
   useEffect(() => {
     setThreads([]);
+    setDispatchedThreadIds(new Set());
     setRepliesByThread(new Map());
     setSelectedThreadId(null);
     setUnanchoredIds([]);
@@ -270,18 +299,21 @@ export function useReviewComments({
         artifactId,
         versionId,
         watermarkRef.current,
+        "include",
       );
       if (listedThreads.length === 0 || !ownership.settled(token)) return;
       const changedThreads = listedThreads.filter((thread) =>
         threadUpdatedAtRef.current.get(thread.id) !== thread.updatedAt
       );
       if (changedThreads.length === 0) return;
-      const conversations = await loadConversations(
-        projectId,
-        artifactId,
-        changedThreads,
-      );
+      // A changed thread may have been sent, addressed, or released, so the
+      // dispatch membership is read again alongside the changed conversations.
+      const [conversations, dispatchedIds] = await Promise.all([
+        loadConversations(projectId, artifactId, changedThreads),
+        loadDispatchedThreadIds(projectId, artifactId, versionId),
+      ]);
       if (!ownership.settled(token)) return;
+      setDispatchedThreadIds(dispatchedIds);
       setThreads((current) => mergeThreads(
         current,
         conversations.map(({thread}) => thread),
@@ -411,10 +443,15 @@ export function useReviewComments({
     }
   }, [artifactId, ownership, projectId, reload]);
 
-  const annotations = useMemo(
-    () => threads.filter((thread) => thread.state === "open").map(toAnnotation),
-    [threads],
+  const undispatchedThreads = useMemo(
+    () => threads.filter((thread) => !dispatchedThreadIds.has(thread.id)),
+    [dispatchedThreadIds, threads],
   );
+  const openThreads = useMemo(
+    () => undispatchedThreads.filter((thread) => thread.state === "open"),
+    [undispatchedThreads],
+  );
+  const annotations = useMemo(() => openThreads.map(toAnnotation), [openThreads]);
 
   return {
     annotations,
@@ -422,8 +459,10 @@ export function useReviewComments({
     changeState,
     createReply,
     deleteReply,
+    dispatchedThreadIds,
     error,
     loading,
+    openThreads,
     projectId,
     reload,
     repliesByThread,
@@ -431,6 +470,7 @@ export function useReviewComments({
     selectThread: setSelectedThreadId,
     submit,
     threads,
+    undispatchedThreads,
     unanchoredIds,
     updateUnanchored: setUnanchoredIds,
     updateReply,
@@ -647,12 +687,15 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
     view === "sent" && session.artifactId !== null && versionId !== null,
   );
 
-  const openThreads = session.threads.filter((thread) => thread.state === "open");
+  // Open is what is still in the reviewer's hands; Resolved and All are
+  // explicit filters that keep threads an agent addressed, with their replies.
+  const openThreads = session.openThreads;
+  const allOpenThreads = session.threads.filter((thread) => thread.state === "open");
   const resolvedThreads = session.threads.filter((thread) => thread.state === "resolved");
   const visibleThreads = view === "sent"
     ? sentThreads
     : view === "all"
-      ? [...openThreads, ...resolvedThreads]
+      ? [...allOpenThreads, ...resolvedThreads]
       : view === "open"
         ? openThreads
         : resolvedThreads;
@@ -808,7 +851,8 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                         ) : null
                       ) : (
                         <>
-                          {canComment && thread.state === "open" ? (
+                          {canComment && thread.state === "open"
+                              && !session.dispatchedThreadIds.has(thread.id) ? (
                             <SendToAgentControl
                               agents={agents}
                               artifact={agentArtifact}
