@@ -153,6 +153,10 @@ error, and returns to the same link. An exact-version address goes through
 the application origin, which issues a bootstrap for that version once the
 viewer is signed in. Programs and embedded resources still receive a 401
 ([ADR 0035](decisions/0035-private-links-sign-in.md)).
+A browser whose sign-in this installation refuses, or whose link names an
+artifact the viewer cannot see, gets a short page saying what to do rather
+than a JSON error; a restricted artifact's page is the same as a missing
+one's ([ADR 0043](decisions/0043-browser-failure-pages.md)).
 
 Private responses are not stored in a shared CDN cache in the first release. The current public version may use immutable CDN caching.
 

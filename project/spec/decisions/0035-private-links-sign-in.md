@@ -79,7 +79,8 @@ the content-session capability as before.
 ## Not part of this decision
 
 - An HTML page for other failures a person can meet on these routes, such as a
-  provider refusing admission or a restricted artifact answering not found.
+  provider refusing admission or a restricted artifact answering not found. See
+  [0043: Browser failure pages](0043-browser-failure-pages.md).
 - Longer content sessions, or renewing them while a person reads a version.
 
 ## Rejected alternatives

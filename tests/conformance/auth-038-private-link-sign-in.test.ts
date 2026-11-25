@@ -246,15 +246,17 @@ describe("private artifact links send a browser through sign-in and back", () =>
     expect(new URL(requiredLocation(forged), server.baseUrl).pathname).toBe("/auth/login");
 
     // A member who may not read a restricted artifact gets the same not-found
-    // answer as for a missing artifact, and no bootstrap.
+    // answer as for a missing artifact, and no bootstrap. A program reads the
+    // JSON error; a browser navigation gets a page instead (AUTH-042).
     const hidden = await publishSite("Hidden plan", "restricted");
     const ben = await signIn("ben@example.test", "ben-subject");
     const refused = await Promise.all([
       `/artifacts/${hidden.artifact.id}`,
       `/open/${hidden.version.contentToken}`,
     ].map(async (requestPath) => {
-      const response = await navigate(server, `${server.baseUrl}${requestPath}`, {
-        Cookie: ben.header,
+      const response = await fetch(`${server.baseUrl}${requestPath}`, {
+        headers: {Cookie: ben.header},
+        redirect: "manual",
       });
       return {
         code: failureSchema.parse(await response.json()).error.code,
@@ -269,13 +271,15 @@ describe("private artifact links send a browser through sign-in and back", () =>
     })));
 
     // Version hosts that do not exist or are malformed issue nothing.
-    const unknown = await navigate(server, `${server.baseUrl}/open/${"a".repeat(32)}`, {
-      Cookie: administrator.header,
+    const unknown = await fetch(`${server.baseUrl}/open/${"a".repeat(32)}`, {
+      headers: {Cookie: administrator.header},
+      redirect: "manual",
     });
     expect(unknown.status).toBe(404);
     expect(failureSchema.parse(await unknown.json()).error.code).toBe("VERSION_NOT_FOUND");
-    const malformed = await navigate(server, `${server.baseUrl}/open/not-a-token`, {
-      Cookie: administrator.header,
+    const malformed = await fetch(`${server.baseUrl}/open/not-a-token`, {
+      headers: {Cookie: administrator.header},
+      redirect: "manual",
     });
     expect(malformed.status).toBe(422);
     expect(malformed.headers.get("location")).toBeNull();
