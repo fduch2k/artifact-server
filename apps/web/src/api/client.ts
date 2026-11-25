@@ -151,6 +151,42 @@ const artifactSchema = z.object({
   tags: z.array(z.string()),
 });
 
+/**
+ * Who stands behind an owner or publisher id: an active member by name (and
+ * email, for people), otherwise a label for a former member, a service key,
+ * or the local token.
+ */
+const principalAttributionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    displayName: z.string(),
+    email: z.string().nullable(),
+    kind: z.literal("member"),
+    label: z.string(),
+    principalId: z.string(),
+  }),
+  z.object({
+    kind: z.literal("former-member"),
+    label: z.string(),
+    principalId: z.string(),
+  }),
+  z.object({
+    keyName: z.string().nullable(),
+    kind: z.literal("service"),
+    label: z.string(),
+    principalId: z.string(),
+  }),
+  z.object({
+    kind: z.literal("local"),
+    label: z.string(),
+    principalId: z.string(),
+  }),
+  z.object({
+    kind: z.literal("unknown"),
+    label: z.string(),
+    principalId: z.string(),
+  }),
+]);
+
 const memberDirectoryEntrySchema = z.object({
   displayName: z.string(),
   email: z.string(),
@@ -190,6 +226,8 @@ const manifestSchema = z.object({
 const artifactVersionSchema = z.object({
   links: z.object({ review: z.url(), version: z.url() }),
   manifest: manifestSchema,
+  /** Who published the version; read endpoints carry it, writes do not. */
+  publisher: principalAttributionSchema.optional(),
   version: versionSchema,
 });
 
@@ -222,6 +260,7 @@ export type ProjectGitHistorySetting = z.infer<typeof projectGitHistorySettingSc
 export type ProjectGitHistoryEstimate = z.infer<typeof projectGitHistoryEstimateSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
 export type MemberDirectoryEntry = z.infer<typeof memberDirectoryEntrySchema>;
+export type PrincipalAttribution = z.infer<typeof principalAttributionSchema>;
 export type ManifestEntry = z.infer<typeof manifestEntrySchema>;
 export type Version = z.infer<typeof versionSchema>;
 export type Manifest = z.infer<typeof manifestSchema>;
@@ -295,6 +334,8 @@ export interface ArtifactPage {
       readonly artifact: string;
       readonly management: string;
     };
+    /** Who owns the artifact; null for one from before owners were recorded. */
+    readonly owner: PrincipalAttribution | null;
     readonly versionCount: number;
   }[];
   readonly nextCursor: string | null;
@@ -309,6 +350,8 @@ export interface ArtifactDetails {
     readonly live?: string | undefined;
     readonly management: string;
   };
+  /** Who owns the artifact; null for one from before owners were recorded. */
+  readonly owner: PrincipalAttribution | null;
   /** Present only on a local deployment that linked this artifact to a file. */
   readonly sourceBinding?: SourceBinding | undefined;
 }
@@ -381,6 +424,7 @@ const artifactPageSchema: z.ZodType<ArtifactPage> = z.object({
     artifact: artifactSchema,
     commentCount: z.number().int().nonnegative(),
     links: z.object({ artifact: z.url(), management: z.url() }),
+    owner: principalAttributionSchema.nullable(),
     versionCount: z.number().int().positive(),
   })),
   nextCursor: z.string().nullable(),
@@ -394,6 +438,7 @@ const artifactDetailsSchema: z.ZodType<ArtifactDetails> = z.object({
     live: z.url().optional(),
     management: z.url(),
   }),
+  owner: principalAttributionSchema.nullable(),
   sourceBinding: sourceBindingSchema.optional(),
 });
 
@@ -1003,6 +1048,7 @@ export const api = {
       artifactId: z.string(),
       versions: z.array(z.object({
         links: z.object({ review: z.url(), version: z.url() }),
+        publisher: principalAttributionSchema.optional(),
         version: versionSchema,
       })),
     }),
