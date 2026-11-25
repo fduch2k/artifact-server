@@ -974,6 +974,10 @@ function ArtifactReview({
     && session.principal.kind === "human"
     && session.principal.authorizedByPrincipalId === null
     && session.principal.membershipRole !== "administrator";
+  // Agent setup texts lead with a personal key only where this person can issue one.
+  const canIssuePersonalApiKey = session.capabilities.personalApiKeys !== null
+    && session.principal.kind === "human"
+    && session.principal.authorizedByPrincipalId === null;
   const canManageSelectedArtifact = canManageArtifacts && (
     !sessionIsOwnerScoped
     || details?.artifact.ownerPrincipalId === session.principal.id
@@ -1683,6 +1687,7 @@ function ArtifactReview({
                     details={details}
                     key={`focus-share-${details?.artifact.id ?? "empty"}`}
                     onArtifactChanged={updateArtifact}
+                    personalApiKeys={canIssuePersonalApiKey}
                     selectedPath={selectedPath}
                     selectedVersion={selectedVersion}
                     triggerClassName="as-button as-focus-controls__button"
@@ -1804,6 +1809,7 @@ function ArtifactReview({
                 details={details}
                 key={`header-share-${details?.artifact.id ?? "empty"}`}
                 onArtifactChanged={updateArtifact}
+                personalApiKeys={canIssuePersonalApiKey}
                 selectedPath={selectedPath}
                 selectedVersion={selectedVersion}
                 triggerClassName="as-button as-button--secondary"

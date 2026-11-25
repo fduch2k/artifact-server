@@ -104,6 +104,8 @@ Install the portable Agent Skill:
 npx skills add plannotator/artifact-server
 ```
 
+An installation can offer its own skill source through `ARTIFACT_SERVER_AGENT_SKILL`; **Settings → MCP** then shows that command instead. See [deployment](deployment.md#offer-the-installations-own-agent-skill).
+
 The skill routes artifact work and explicit server-administration work to separate internal instructions. It uses the CLI for files on the developer machine and MCP for server data and agent-held context.
 
 In clients that expose installed skills as slash commands, publish finished work with a request such as:

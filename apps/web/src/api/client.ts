@@ -62,7 +62,12 @@ const gitHistoryCapabilitySchema = z.object({
  * never learned the field is a deployment without the capability, so the
  * default keeps every gated affordance hidden rather than guessed at.
  */
+/** The upstream skill, offered by a deployment that names none of its own. */
+const defaultAgentSkillSource = "plannotator/artifact-server";
+
 const deploymentCapabilitiesSchema = z.object({
+  /** Skills-CLI source of the agent skill this installation offers. */
+  agentSkill: z.string().default(defaultAgentSkillSource),
   gitHistory: gitHistoryCapabilitySchema.default(disabledGitHistoryCapability),
   linkedArtifacts: z.boolean(),
   /** A person's session manages only the artifacts they own (ADR 0038). */
@@ -72,6 +77,7 @@ const deploymentCapabilitiesSchema = z.object({
     maxLifetimeDays: z.number().int().positive(),
   }).nullable().default(null),
 }).default({
+  agentSkill: defaultAgentSkillSource,
   gitHistory: disabledGitHistoryCapability,
   linkedArtifacts: false,
   ownerScopedManagement: false,

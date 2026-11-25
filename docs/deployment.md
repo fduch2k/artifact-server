@@ -92,6 +92,30 @@ session, never from another key. Invalid values fail startup. The settings apply
 to compact Compose, external-storage Compose, and the Cloudflare Worker; the Helm
 chart does not render them yet.
 
+With the switch on, **Settings → MCP** and the review prompt that **Share →
+Copy review prompt** builds lead with issuing a personal key and give browser
+sign-in only as the alternative. Use that when MCP OAuth cannot work with the
+installation's sign-in provider, for example an OIDC provider without dynamic
+client registration or JWT access tokens for the `/mcp` audience.
+
+### Offer the installation's own agent skill
+
+**Settings → MCP** offers a command that installs the Artifact Server agent
+skill, `npx skills add plannotator/artifact-server` by default. Set
+`ARTIFACT_SERVER_AGENT_SKILL` to offer another skill source instead, such as a
+fork that adds the installation's own conventions:
+
+```sh
+ARTIFACT_SERVER_AGENT_SKILL=example/agent-skill
+```
+
+The value is an `owner/repository` shorthand with an optional path, or an
+`https://` repository address, of at most 200 characters. Review prints it
+inside a shell command, so anything else, including spaces and shell syntax,
+fails startup. The server never fetches or installs the skill. The setting
+applies to compact Compose, external-storage Compose, and the Cloudflare Worker;
+the Helm chart does not render it yet.
+
 ### Keep browser sessions alive while people use them
 
 A browser session lasts 12 hours from sign-in by default, however much it is

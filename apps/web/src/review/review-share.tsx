@@ -50,6 +50,8 @@ interface ReviewShareControlProps {
   readonly canManageAccess: boolean;
   readonly details: ArtifactDetails | null;
   readonly onArtifactChanged: (artifact: ArtifactDetails["artifact"]) => void;
+  /** The viewer may issue a personal API key, so agent setup leads with it. */
+  readonly personalApiKeys: boolean;
   readonly selectedPath: string | null;
   readonly selectedVersion: ArtifactVersion | null;
   readonly triggerClassName: string;
@@ -60,6 +62,7 @@ export function ReviewShareControl({
   canManageAccess,
   details,
   onArtifactChanged,
+  personalApiKeys,
   selectedPath,
   selectedVersion,
   triggerClassName,
@@ -134,7 +137,7 @@ export function ReviewShareControl({
   const copyAgentPrompt = async (): Promise<void> => {
     if (details === null || selectedVersion === null || reviewLink === null) return;
     await copyText(
-      buildAgentReviewPrompt(details, selectedVersion, reviewLink),
+      buildAgentReviewPrompt(details, selectedVersion, reviewLink, personalApiKeys),
       "agent-prompt",
       "The agent review prompt could not be copied.",
     );
@@ -454,7 +457,11 @@ export function ReviewShareControl({
                     <strong>Team or remote server</strong>
                     <span>MCP</span>
                   </header>
-                  <p>Add this server address to the agent. Compatible deployments open browser sign-in; other self-hosted deployments use an administrator-issued scoped key.</p>
+                  <p>
+                    {personalApiKeys
+                      ? "Issue a personal API key in Settings → Personal API keys, then add this server address to the agent with the key as its bearer token. Browser sign-in is an alternative only where the agent and this installation support MCP authorization."
+                      : "Add this server address to the agent. Compatible deployments open browser sign-in; other self-hosted deployments use an administrator-issued scoped key."}
+                  </p>
                   <CopyableAgentValue
                     copied={copiedTarget === "mcp-address"}
                     label="Copy MCP server address"
@@ -472,7 +479,11 @@ export function ReviewShareControl({
                     <strong>Without MCP</strong>
                     <span>HTTP API</span>
                   </header>
-                  <p>The review prompt includes an exact authenticated API request for this version. Use a scoped API key from an administrator and never paste it into chat.</p>
+                  <p>
+                    {personalApiKeys
+                      ? "The review prompt includes an exact authenticated API request for this version. Use a personal API key from Settings → Personal API keys and never paste it into chat."
+                      : "The review prompt includes an exact authenticated API request for this version. Use a scoped API key from an administrator and never paste it into chat."}
+                  </p>
                 </section>
 
                 {failure === null ? null : (
@@ -707,8 +718,13 @@ function buildAgentReviewPrompt(
   details: ArtifactDetails,
   selectedVersion: ArtifactVersion,
   reviewLink: string,
+  personalApiKeys: boolean,
 ): string {
   const serverOrigin = new URL(details.links.artifact).origin;
+  const remoteSetup = personalApiKeys
+    ? `- Remote or team setup: ask the person to issue a personal API key in Settings → Personal API keys (${serverOrigin}/review/settings/personal-api-keys) and give it to the agent outside the chat, then add ${serverOrigin}/mcp to the agent with that key as its bearer token. Browser sign-in is an alternative only where the agent and this installation support MCP authorization.`
+    : `- Remote or team setup: add ${serverOrigin}/mcp to the agent and complete browser sign-in, or use an administrator-issued scoped key when OAuth is unavailable.`;
+  const credential = personalApiKeys ? "personal API key" : "scoped API key";
   const apiUrl = new URL(
     `/api/v1/artifacts/${encodeURIComponent(details.artifact.id)}/versions/${encodeURIComponent(selectedVersion.version.id)}`,
     serverOrigin,
@@ -741,8 +757,8 @@ Preferred path — Artifact Server MCP:
 
 If Artifact Server MCP is not connected:
 - Local setup: run artifactserver connect, then retry with MCP.
-- Remote or team setup: add ${serverOrigin}/mcp to the agent and complete browser sign-in, or use an administrator-issued scoped key when OAuth is unavailable.
-- Direct HTTP fallback: GET ${apiUrl.toString()} with an admitted session or scoped API key.
+${remoteSetup}
+- Direct HTTP fallback: GET ${apiUrl.toString()} with an admitted session or ${credential}.
 - curl example: curl --fail-with-body --header "Authorization: Bearer $ARTIFACT_SERVER_API_KEY" '${apiUrl.toString()}'
 
 Never paste credentials into chat, source files, or the review. If access fails, state which connection or permission is missing.`;

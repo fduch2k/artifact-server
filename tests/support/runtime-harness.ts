@@ -110,6 +110,7 @@ export async function startTestServer(
     readonly observability?: boolean;
     readonly ownerScopedManagement?: boolean;
     readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
+    readonly agentSkillSource?: string;
     readonly port?: number;
     readonly slidingSessionPolicy?: SlidingSessionPolicy;
     readonly webAssetsRoot?: string;
@@ -198,6 +199,9 @@ export async function startTestServer(
   }
   if (options.ownerScopedManagement !== undefined) {
     config = {...config, ownerScopedManagement: options.ownerScopedManagement};
+  }
+  if (options.agentSkillSource !== undefined) {
+    config = {...config, agentSkillSource: options.agentSkillSource};
   }
   if (options.personalApiKeyPolicy !== undefined) {
     config = {...config, personalApiKeyPolicy: options.personalApiKeyPolicy};

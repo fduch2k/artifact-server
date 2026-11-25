@@ -660,6 +660,55 @@ describe("Artifact Server lifecycle CLI", () => {
     }
   }, 30_000);
 
+  test("SKL-007-B: compact serving advertises the operator's agent skill and refuses a malformed one", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "artifact-server-agent-skill-"));
+    const dataDirectory = path.join(parent, "data");
+    try {
+      const initialized = await runCli([
+        "init",
+        "--admin-email",
+        "admin@example.test",
+        "--data",
+        dataDirectory,
+      ]);
+      expect(initialized.exitCode).toBe(0);
+      const oidc = {
+        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-test-client",
+        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
+      };
+      const malformed = await runCli(
+        ["start-compact", "--data", dataDirectory, "--port", "0"],
+        compactEnvironment({
+          ...oidc,
+          ARTIFACT_SERVER_AGENT_SKILL: "example/agent-skill; curl example.test",
+        }),
+      );
+      expect(malformed.exitCode).not.toBe(0);
+      expect(malformed.output).toContain("ARTIFACT_SERVER_AGENT_SKILL");
+
+      const port = await availablePort();
+      const server = startCli(
+        ["start-compact", "--data", dataDirectory, "--port", String(port)],
+        compactEnvironment({...oidc, ARTIFACT_SERVER_AGENT_SKILL: "example/agent-skill"}),
+      );
+      await waitForOutput(server, '"status":"ready"');
+      const apiToken = (await readFile(
+        path.join(dataDirectory, "secrets/api-token"),
+        "utf8",
+      )).trim();
+      const session = await fetch(`http://127.0.0.1:${port}/api/v1/session`, {
+        headers: {Authorization: `Bearer ${apiToken}`},
+      });
+      expect(session.status).toBe(200);
+      expect(z.object({
+        capabilities: z.object({agentSkill: z.string()}),
+      }).parse(await session.json()).capabilities.agentSkill).toBe("example/agent-skill");
+      await stopProcess(server);
+    } finally {
+      await rm(parent, {force: true, recursive: true});
+    }
+  }, 30_000);
+
   test("AUTH-037: compact serving refuses a malformed session idle window", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "artifact-server-session-idle-"));
     const dataDirectory = path.join(parent, "data");

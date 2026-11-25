@@ -2238,6 +2238,20 @@ requirements:
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-25T18:29:58.000Z"
 
+  - id: MCP-022
+    kind: behavior
+    behavior: Where the operator lets members issue personal API keys, Settings → MCP and the Share dialog's review prompt and agent setup notes lead with issuing a personal API key in Settings → Personal API keys and offer browser sign-in only as the alternative; otherwise they keep browser sign-in and administrator-issued scoped keys.
+    owner: mcp
+    source: {file: artifact-server-product-spec.html, anchor: mcp}
+    acceptance:
+      behavior: {id: MCP-022-B, description: "With personal keys enabled, Settings → MCP leads the remote connection with a personal API key and links to Personal API keys, the copied review prompt tells the agent to have the person issue a personal key at the installation's Personal API keys address before mentioning browser sign-in and names a personal key for the HTTP fallback, and the Connect MCP notes name a personal key."}
+      failure: {id: MCP-022-F, description: "With personal keys off, no text offers a personal API key or links to Personal API keys; Settings → MCP keeps browser sign-in and asks an administrator for a scoped key, and the review prompt and Connect MCP notes keep browser sign-in and administrator-issued scoped keys."}
+    deployments: *all
+    status: implementing
+    proof_gap: MCP-022-B and MCP-022-F run as browser tests against the local SQLite server in Chromium, where the copied prompt is read from the clipboard. The texts come from the session discovery that the Postgres and Worker runtimes already advertise for AUTH-034, but no browser test drives Review on those runtimes, and no deployment-specific evidence is recorded.
+    depends_on: [AUTH-034, MCP-017]
+    evidence: []
+
   - id: SKL-001
     kind: behavior
     behavior: Artifact Server ships one portable artifact-server skill that routes routine artifact work and explicit server-operation work to separate internal references.
@@ -2319,6 +2333,20 @@ requirements:
     status: implementing
     proof_gap: Format, validation, and repository forward-test records exist for the unified skill, but released distribution metadata, supported-client installation, release matching, old-server behavior, and route-selection evidence remain incomplete.
     depends_on: [SKL-001, MCP-003]
+    evidence: []
+
+  - id: SKL-007
+    kind: deployment
+    behavior: An installation may name its own agent skill source through ARTIFACT_SERVER_AGENT_SKILL; session discovery advertises it, Settings → MCP offers its installation command, and an unset value offers the upstream plannotator/artifact-server skill. The server only displays the source and never fetches or installs it.
+    owner: agent-skills
+    source: {file: artifact-server-product-spec.html, anchor: mcp}
+    acceptance:
+      behavior: {id: SKL-007-B, description: "A named owner/repository or https:// source is kept exactly, compact serving and the Worker advertise it in session discovery, and Settings → MCP shows and copies npx skills add with that source; without the setting it shows the upstream skill."}
+      failure: {id: SKL-007-F, description: "A source with spaces, shell syntax, a leading dash, a single segment, a non-https scheme, a bare host, or more than 200 characters fails startup in the parser, compact serving, and the Worker, so Review never prints it inside a shell command."}
+    deployments: *all
+    status: implementing
+    proof_gap: SKL-007-B and SKL-007-F run against the parser, the compact CLI start, the local Worker harness, and a Chromium browser test of Settings → MCP on the local SQLite server. External-storage serving reads the same setting through the same parser but has no dedicated test, the Helm chart does not render it, and no deployment-specific evidence is recorded.
+    depends_on: [SKL-006]
     evidence: []
 
   - id: CMT-001

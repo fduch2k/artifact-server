@@ -1,5 +1,6 @@
 import {Effect, Layer, ManagedRuntime, type Redacted} from "effect";
 
+import {defaultAgentSkillSource} from "../core/agent-skill.js";
 import type {ApplicationRuntime} from "../application/application-runtime.js";
 import type {
   BearerCredentialVerifier,
@@ -78,6 +79,8 @@ export interface ExternalStorageRuntimeConfig {
   readonly externalIdentityAdmissionPolicy?: ExternalIdentityAdmissionPolicy;
   /** Members may issue their own owner-scoped API keys; absent leaves it to administrators. */
   readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
+  /** Skills-CLI source Review offers for the agent skill; absent offers the upstream skill. */
+  readonly agentSkillSource?: string;
   /** Use keeps a browser session alive for this idle window; absent keeps fixed sessions. */
   readonly slidingSessionPolicy?: SlidingSessionPolicy;
   /** A person's session manages only artifacts they own (ADR 0038); absent keeps AUTH-008. */
@@ -259,6 +262,7 @@ export async function createExternalStorageRuntime(
         fixedGitHistoryCapabilityReader(gitHistory.capability),
       ownerScopedManagement: config.ownerScopedManagement === true,
       personalApiKeyPolicy: config.personalApiKeyPolicy ?? null,
+      agentSkillSource: config.agentSkillSource ?? defaultAgentSkillSource,
       readiness: () => externalStorageReadiness(database, connectedObjectStorage),
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(),

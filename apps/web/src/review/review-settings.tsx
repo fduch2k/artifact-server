@@ -174,6 +174,7 @@ function SettingsContent({
     return (
       <McpScreen
         administrator={administrator}
+        agentSkill={session.capabilities.agentSkill}
         personalApiKeys={directHuman && personalApiKeys !== null}
       />
     );

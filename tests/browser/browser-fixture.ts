@@ -21,16 +21,17 @@ export interface BrowserFixture {
 export async function startBrowserFixture(
   browser: Browser,
   options: {
+    readonly agentSkillSource?: string;
     readonly personalApiKeyPolicy?: PersonalApiKeyPolicy;
     readonly timezoneId?: string;
   } = {},
 ): Promise<BrowserFixture> {
-  const {personalApiKeyPolicy, ...contextOptions} = options;
+  const {agentSkillSource, personalApiKeyPolicy, ...contextOptions} = options;
   const installation = await createTestInstallation();
-  const server = await startTestServer(
-    installation,
-    personalApiKeyPolicy === undefined ? {} : {personalApiKeyPolicy},
-  );
+  const serverOptions: Parameters<typeof startTestServer>[1] = {};
+  if (agentSkillSource !== undefined) Object.assign(serverOptions, {agentSkillSource});
+  if (personalApiKeyPolicy !== undefined) Object.assign(serverOptions, {personalApiKeyPolicy});
+  const server = await startTestServer(installation, serverOptions);
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   return {context, installation, page, server};
