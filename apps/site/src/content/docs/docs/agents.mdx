@@ -156,6 +156,10 @@ Pick the agent you use. The choice is remembered across pages.
 
 With more than one connected agent, the send control becomes a split button. The main button uses the last agent selected for this project. The menu lists the other agents and their presence states. If that agent disconnects, the control asks you to select another agent.
 
+## Remove an agent
+
+A one-off registration, such as a test session, stays in the send control until it has been silent for seven days. To remove it sooner, open **Settings → Agents** and choose **Remove**. You can remove your own agents; an administrator can remove any agent. An agent that still holds a send that is queued, picked up, or delivered stays until the send is canceled, fails, or every thread in it is resolved. If the same agent connects again later, it appears as a new agent.
+
 ## Build an extension for another agent
 
 Each extension is an adapter over [@plannotator/agent-bridge](https://github.com/plannotator/agent-bridge) (MIT). The bridge handles registration, claims, bundle format, and comment operations. An adapter supplies a `HostPort` for user notifications, session messages, and compaction state. The package documents the wire protocol in `PROTOCOL.md`. The Pi, OpenCode, and Claude channel adapters are available under [`integrations/`](https://github.com/plannotator/artifact-server/tree/main/integrations).

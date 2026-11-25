@@ -93,6 +93,7 @@ import type {
   DeleteCommentThread,
   ExchangeContentBootstrap,
   ExpiredStagedUpload,
+  ForgetAgentOutcome,
   GrantArtifactAccess,
   ListAgentDispatches,
   ListArtifactActions,
@@ -2996,6 +2997,45 @@ export class PostgresArtifactRepository implements
       const sql = yield* SqlClient;
       yield* sql`DELETE FROM registered_agents
         WHERE installation_id = ${installationId} AND id = ${agentId}`;
+    }));
+  }
+
+  forgetAgent(
+    installationId: string,
+    agentId: string,
+    now: string,
+  ): Promise<ForgetAgentOutcome> {
+    this.#assertInstallationScope(installationId);
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.withTransaction(Effect.gen({self: this}, function*() {
+        // Lock the registration so a concurrent forget or upsert waits.
+        const agents = yield* sql`SELECT id FROM registered_agents
+          WHERE installation_id = ${installationId} AND id = ${agentId}
+          FOR UPDATE`;
+        if (agents.length === 0) return "missing" as const;
+        const activeSql = `${agentDispatchColumns}
+           WHERE dispatch.installation_id = $1 AND dispatch.agent_id = $2
+             AND dispatch.state IN ('queued', 'claimed', 'delivered')
+           ORDER BY dispatch.id
+           FOR UPDATE`;
+        // Settle what a read would settle first: a fully resolved delivered
+        // bundle is addressed, and a stale live agent's queue has failed.
+        const pending = z.array(agentDispatchRowSchema).parse(
+          yield* sql.unsafe<object>(activeSql, [installationId, agentId]),
+        );
+        for (const row of pending) {
+          yield* this.#applyLazyDispatchTransitions(row, now);
+        }
+        const stillActive = yield* sql.unsafe<object>(
+          activeSql,
+          [installationId, agentId],
+        );
+        if (stillActive.length > 0) return "active-dispatch" as const;
+        yield* sql`DELETE FROM registered_agents
+          WHERE installation_id = ${installationId} AND id = ${agentId}`;
+        return "forgotten" as const;
+      }));
     }));
   }
 

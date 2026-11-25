@@ -640,6 +640,10 @@ export function createApplicationLayer(
         "disconnectRegisteredAgent",
         () => dispatchStore.disconnectAgent(installationId, agentId),
       ),
+      forgetAgent: (installationId, agentId, now) => dispatchEffect(
+        "forgetRegisteredAgent",
+        () => dispatchStore.forgetAgent(installationId, agentId, now),
+      ),
       findAgent: (installationId, agentId) => dispatchEffect(
         "findRegisteredAgent",
         () => dispatchStore.findAgent(installationId, agentId),

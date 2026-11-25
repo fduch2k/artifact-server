@@ -126,6 +126,14 @@ POST /api/v1/agents/:agentId/disconnect
 
 Answers `204`. A courtesy teardown that deletes the agent row when the host session ends. Dispatch history is unaffected, because it snapshots the agent name. It is idempotent, and a crashed bridge that never calls it costs nothing: the row goes stale and is reaped.
 
+### Forgetting an agent
+
+```text
+DELETE /api/v1/agents/:agentId
+```
+
+Answers `204`. Unlike disconnect, this is the owner's or an administrator's decision rather than a courtesy from the bridge: Review offers it under Settings → Agents. It is refused with `409 DISPATCH_STATE_CONFLICT` while the agent holds a queued, claimed, or delivered dispatch, and another member's agent answers `404 AGENT_NOT_FOUND`, as a missing one does. A bridge that keeps running after its agent was forgotten registers again on its next `POST /agents` and gets a new agent id.
+
 ## Dispatch lifecycle
 
 | From | To | Cause |

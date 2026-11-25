@@ -559,6 +559,12 @@ export interface ListAgentDispatches {
 }
 
 /**
+ * What removing one registered agent did: removed it, left it because a
+ * queued, claimed, or delivered dispatch still targets it, or found no row.
+ */
+export type ForgetAgentOutcome = "active-dispatch" | "forgotten" | "missing";
+
+/**
  * Persistent agent-registry and dispatch-mailbox operations. Dispatch
  * creation validates and marks its threads in one transaction; claim,
  * failure, and cancellation apply their state checks and thread markers in
@@ -582,6 +588,17 @@ export interface AgentDispatchRepository {
   ): Promise<AgentDispatchRecord | null>;
   createDispatch(command: CreateAgentDispatch): Promise<AgentDispatchCreation>;
   disconnectAgent(installationId: string, agentId: string): Promise<void>;
+  /**
+   * Remove one registered agent unless it still holds work. The lazy
+   * transitions of its dispatches are applied first, in the same
+   * transaction, so a lapsed claim lease, a stale live agent's queue, and a
+   * fully resolved delivered bundle count as they would on any read.
+   */
+  forgetAgent(
+    installationId: string,
+    agentId: string,
+    now: string,
+  ): Promise<ForgetAgentOutcome>;
   findAgent(
     installationId: string,
     agentId: string,

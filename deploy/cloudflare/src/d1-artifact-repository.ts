@@ -110,6 +110,7 @@ import type {
   DeleteCommentThread,
   ExchangeContentBootstrap,
   ExpiredStagedUpload,
+  ForgetAgentOutcome,
   GrantArtifactAccess,
   ListAgentDispatches,
   ListArtifactActions,
@@ -3806,6 +3807,36 @@ export function createD1ArtifactRepository(
       await database.prepare(
         "DELETE FROM registered_agents WHERE installation_id = ? AND id = ?",
       ).bind(installationScope, agentId).run();
+    },
+    forgetAgent: async (
+      installationScope: string,
+      agentId: string,
+      now: string,
+    ): Promise<ForgetAgentOutcome> => {
+      // One atomic batch: settle the agent's dispatches as a read would, then
+      // remove the row only while none of them is queued, claimed, or
+      // delivered.
+      const results = await database.batch<object>([
+        ...transitionStatements(
+          "installation_id = ? AND agent_id = ?",
+          [installationScope, agentId],
+          now,
+        ),
+        database.prepare(`
+          DELETE FROM registered_agents
+          WHERE installation_id = ? AND id = ? AND NOT EXISTS (
+            SELECT 1 FROM agent_dispatches d
+            WHERE d.installation_id = registered_agents.installation_id
+              AND d.agent_id = registered_agents.id
+              AND d.state IN ('queued', 'claimed', 'delivered')
+          )
+        `).bind(installationScope, agentId),
+      ]);
+      if ((results.at(-1)?.meta.changes ?? 0) === 1) return "forgotten";
+      const found = await database.prepare(
+        "SELECT 1 AS found FROM registered_agents WHERE installation_id = ? AND id = ?",
+      ).bind(installationScope, agentId).first();
+      return found === null ? "missing" : "active-dispatch";
     },
     listAgents: async (
       installationScope: string,

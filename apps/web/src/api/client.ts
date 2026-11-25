@@ -1357,6 +1357,14 @@ export const api = {
     z.object({ items: z.array(registeredAgentSchema) }),
     "/api/v1/agents",
   ).then(({ items }) => items),
+  /**
+   * Forget one registered agent: its owner or an administrator may, while it
+   * holds no queued, claimed, or delivered dispatch.
+   */
+  forgetAgent: (agentId: string) => requestNoContent(
+    `/api/v1/agents/${encodeURIComponent(agentId)}`,
+    { headers: mutationHeaders(), method: "DELETE" },
+  ),
   agentDispatches: (projectId: string, query: AgentDispatchQuery) => {
     const search = new URLSearchParams({ projectId });
     if (query.agentId !== null) search.set("agentId", query.agentId);

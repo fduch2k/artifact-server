@@ -6,6 +6,7 @@ import {StatePanel} from "@/components/product";
 import {Button, ButtonLink} from "@/components/ui/button";
 import {ArtifactMark} from "./artifact-mark.tsx";
 import {parseSettingsRoute, type SettingsRoute} from "./review-routes.ts";
+import {AgentsScreen} from "./settings-agents.tsx";
 import {ApiKeysScreen} from "./settings-api-keys.tsx";
 import {McpScreen} from "./settings-mcp.tsx";
 import {MembersScreen} from "./settings-members.tsx";
@@ -80,6 +81,11 @@ export function ReviewSettings({
           {canManageProjects ? (
             <SettingsLink active={route.kind === "projects" || route.kind === "project"} href="/review/settings/projects">
               Projects
+            </SettingsLink>
+          ) : null}
+          {directHuman ? (
+            <SettingsLink active={route.kind === "agents"} href="/review/settings/agents">
+              Agents
             </SettingsLink>
           ) : null}
           <SettingsLink active={route.kind === "mcp"} href="/review/settings/mcp">
@@ -179,6 +185,16 @@ function SettingsContent({
       />
     );
   }
+  if (route.kind === "agents") {
+    // Agents connect through keys; forgetting one is done from a person's session.
+    if (!directHuman) return <AgentsNeedSession />;
+    return (
+      <AgentsScreen
+        administrator={administrator}
+        principalId={session.principal.id}
+      />
+    );
+  }
   if (route.kind === "webmcp") return <WebmcpScreen />;
   if (route.kind === "personalApiKeys") {
     // A key cannot list or mint keys: only the person's own session can.
@@ -231,6 +247,15 @@ function PersonalKeysNeedSession() {
   return (
     <StatePanel
       description="Sign in through the browser to see and issue the keys that act as you."
+      title="Browser sign-in required"
+    />
+  );
+}
+
+function AgentsNeedSession() {
+  return (
+    <StatePanel
+      description="Sign in through the browser to see and remove the agents connected as you."
       title="Browser sign-in required"
     />
   );
