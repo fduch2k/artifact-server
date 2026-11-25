@@ -12,12 +12,16 @@ const copiedResetMilliseconds = 1_600;
 /** Explain the supported local and team MCP connection paths for this installation. */
 export function McpScreen({
   administrator,
+  agentSkill,
   personalApiKeys,
 }: {
   readonly administrator: boolean;
+  /** Skills-CLI source of the agent skill this installation offers. */
+  readonly agentSkill: string;
   /** The signed-in member may issue a key that acts as themselves. */
   readonly personalApiKeys: boolean;
 }) {
+  const skillCommand = `npx skills add ${agentSkill}`;
   const [copiedTarget, setCopiedTarget] = useState<CopyTarget | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const copiedResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -79,7 +83,9 @@ export function McpScreen({
         </ConnectionCard>
 
         <ConnectionCard
-          description="Add this exact address in your client’s MCP settings. The client should open browser sign-in when it connects."
+          description={personalApiKeys
+            ? "Issue a personal API key in Settings → Personal API keys, then add this exact address in your client’s MCP settings with the key as its bearer token."
+            : "Add this exact address in your client’s MCP settings. The client should open browser sign-in when it connects."}
           eyebrow="Team or remote server"
           title="Connect with the server address"
         >
@@ -91,7 +97,7 @@ export function McpScreen({
           />
           <p className="text-xs leading-5 text-muted-foreground text-pretty">
             {personalApiKeys
-              ? "If the client cannot use browser authentication, issue a personal API key. It acts as you and reaches only your own artifacts. Never paste a key into chat."
+              ? "The key acts as you and reaches only your own artifacts. Browser sign-in is an alternative only when your client and this installation’s sign-in provider support MCP authorization. Never paste a key into chat."
               : "If the client cannot use browser authentication, ask an administrator for a scoped API key. Never paste a key into chat."}
           </p>
           {personalApiKeys ? (
@@ -140,8 +146,8 @@ export function McpScreen({
         <CopyableValue
           copied={copiedTarget === "skill"}
           label="Copy skill installation command"
-          onCopy={() => void copy("npx skills add plannotator/artifact-server", "skill")}
-          value="npx skills add plannotator/artifact-server"
+          onCopy={() => void copy(skillCommand, "skill")}
+          value={skillCommand}
         />
       </section>
     </div>

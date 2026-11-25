@@ -18,7 +18,7 @@ const assignedAddressSchema = z.object({
   port: z.number().int().positive(),
 });
 const personalSessionSchema = z.object({
-  capabilities: z.object({personalApiKeys: z.unknown()}),
+  capabilities: z.object({agentSkill: z.string(), personalApiKeys: z.unknown()}),
 });
 const notReadySchema = z.object({
   error: z.string(),
@@ -93,6 +93,7 @@ describe("Cloudflare Worker browser-login provider", () => {
       ARTIFACT_SERVER_OIDC_AUTO_ADMIT: "true",
       ARTIFACT_SERVER_OIDC_CLIENT_ID: clientId,
       ARTIFACT_SERVER_OIDC_ISSUER: `${issuerOrigin}/`,
+      ARTIFACT_SERVER_AGENT_SKILL: "example/agent-skill",
       ARTIFACT_SERVER_PERSONAL_API_KEYS: "true",
       ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS: "60",
     });
@@ -108,8 +109,10 @@ describe("Cloudflare Worker browser-login provider", () => {
         headers: {Cookie: cookie},
       });
       expect(session.status).toBe(200);
-      expect(personalSessionSchema.parse(await session.json()).capabilities.personalApiKeys)
-        .toEqual({maxLifetimeDays: 60});
+      const capabilities = personalSessionSchema.parse(await session.json()).capabilities;
+      expect(capabilities.personalApiKeys).toEqual({maxLifetimeDays: 60});
+      // SKL-007: the Worker reads the installation's agent skill too.
+      expect(capabilities.agentSkill).toBe("example/agent-skill");
       const keys = await worker.fetch(`${origin}/api/v1/personal-api-keys`, {
         headers: {Cookie: cookie},
       });
@@ -124,7 +127,9 @@ describe("Cloudflare Worker browser-login provider", () => {
   it.each([
     {ARTIFACT_SERVER_PERSONAL_API_KEYS: "yes"},
     {ARTIFACT_SERVER_PERSONAL_API_KEYS: "true", ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS: "0"},
-  ])("AUTH-034: refuses invalid personal key configuration %j", async (settings) => {
+    // SKL-007: an agent skill source that could carry shell syntax.
+    {ARTIFACT_SERVER_AGENT_SKILL: "example/agent-skill && curl example.test"},
+  ])("AUTH-034 SKL-007: refuses invalid installation configuration %j", async (settings) => {
     const directory = await mkdtemp(join(tmpdir(), "artifact-server-personal-key-policy-"));
     const worker = await startWorker(directory, {
       ARTIFACT_SERVER_OIDC_CLIENT_ID: clientId,

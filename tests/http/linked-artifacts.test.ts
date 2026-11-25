@@ -174,6 +174,8 @@ describe("linked artifacts over the local HTTP boundary", () => {
         ownerScopedManagement: z.literal(false),
         // Personal API keys stay off unless the operator opts in.
         personalApiKeys: z.null(),
+        // Without ARTIFACT_SERVER_AGENT_SKILL the upstream skill is offered.
+        agentSkill: z.literal("plannotator/artifact-server"),
       }).strict(),
     }).loose().parse(await session.json());
     expect(sessionBody.capabilities.linkedArtifacts).toBe(false);

@@ -51,6 +51,7 @@ import {parseSlidingSessionPolicy} from
   "../../../src/identity/sliding-session-policy.js";
 import {parseOwnerScopedManagement} from
   "../../../src/identity/owner-scoped-management-policy.js";
+import {parseAgentSkillSource} from "../../../src/core/agent-skill.js";
 import {parseOidcAdmissionPolicy} from
   "../../../src/identity/oidc-admission-policy.js";
 
@@ -73,6 +74,7 @@ export interface WorkerEnvironment {
   readonly ARTIFACT_SERVER_OIDC_SCOPES?: string;
   readonly ARTIFACT_SERVER_ORIGIN: string;
   readonly ARTIFACT_SERVER_OWNER_SCOPED_MANAGEMENT?: string;
+  readonly ARTIFACT_SERVER_AGENT_SKILL?: string;
   readonly ARTIFACT_SERVER_PERSONAL_API_KEYS?: string;
   readonly ARTIFACT_SERVER_PERSONAL_API_KEY_MAX_DAYS?: string;
   readonly ARTIFACT_SERVER_QUALIFICATION_MODE?: "enabled";
@@ -173,6 +175,7 @@ async function createCloudflareRuntime(
   const ownerScopedManagement = parseOwnerScopedManagement(
     environment.ARTIFACT_SERVER_OWNER_SCOPED_MANAGEMENT,
   );
+  const agentSkillSource = parseAgentSkillSource(environment.ARTIFACT_SERVER_AGENT_SKILL);
   await migrateD1(
     environment.ARTIFACT_SERVER_D1_DATABASE,
     environment.ARTIFACT_SERVER_INSTALLATION_ID,
@@ -243,6 +246,7 @@ async function createCloudflareRuntime(
   await applicationRuntime.context();
   const origin = new URL(environment.ARTIFACT_SERVER_ORIGIN);
   const appDependencies = {
+    agentSkillSource,
     applicationRuntime,
     blobs,
     browserAccess,

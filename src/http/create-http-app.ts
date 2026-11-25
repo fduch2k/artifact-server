@@ -122,6 +122,7 @@ import {
   type VersionContent,
   type VersionRecord,
 } from "../core/model.js";
+import { defaultAgentSkillSource } from "../core/agent-skill.js";
 import type { BlobStore } from "../core/ports.js";
 import {
   disabledGitHistoryCapability,
@@ -497,6 +498,11 @@ export interface HttpAppDependencies {
   readonly contentDomain: string;
   /** Server-only credential accepted from the co-launched Vite proxy. */
   readonly developmentProxyCredential?: Redacted.Redacted;
+  /**
+   * The skills-CLI source Review offers for the agent skill; absent offers
+   * the upstream skill. Discovery only: nothing installs it on the server.
+   */
+  readonly agentSkillSource?: string;
   /** Secret-free optional Git state exposed through authenticated discovery. */
   readonly gitHistory?: GitHistoryCapabilityReader;
   /**
@@ -1062,6 +1068,7 @@ export function createHttpApp(
     context.json({
       authenticationMethod: context.get("authenticationMethod"),
       capabilities: {
+        agentSkill: dependencies.agentSkillSource ?? defaultAgentSkillSource,
         gitHistory: gitHistory.read(),
         linkedArtifacts: dependencies.linkedArtifacts === true,
         ownerScopedManagement: dependencies.ownerScopedManagement === true,

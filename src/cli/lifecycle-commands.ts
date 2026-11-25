@@ -21,6 +21,7 @@ import {parseSlidingSessionPolicy} from
   "../identity/sliding-session-policy.js";
 import {parseOwnerScopedManagement} from
   "../identity/owner-scoped-management-policy.js";
+import {parseAgentSkillSource} from "../core/agent-skill.js";
 import {createOidcIdentityProvider} from
   "../identity/oidc-identity-provider.js";
 import {createWorkOsHostedAuthentication} from
@@ -369,6 +370,7 @@ function configureExternalStorageStart(
       if (ownerScopedManagementFrom(process.env)) {
         serverConfig = {...serverConfig, ownerScopedManagement: true};
       }
+      serverConfig = {...serverConfig, agentSkillSource: agentSkillSourceFrom(process.env)};
       const server = await startExternalStorageServer(serverConfig);
       const displayHostname = options.host === "0.0.0.0"
         ? "localhost"
@@ -452,7 +454,12 @@ async function startCompactServer(
   if (ownerScopedManagementFrom(process.env)) {
     serverConfig = {...serverConfig, ownerScopedManagement: true};
   }
+  serverConfig = {...serverConfig, agentSkillSource: agentSkillSourceFrom(process.env)};
   return startLocalServer(serverConfig);
+}
+
+function agentSkillSourceFrom(environment: NodeJS.ProcessEnv): string {
+  return parseAgentSkillSource(environment["ARTIFACT_SERVER_AGENT_SKILL"]);
 }
 
 function ownerScopedManagementFrom(environment: NodeJS.ProcessEnv): boolean {
