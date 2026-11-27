@@ -49,9 +49,36 @@ function withResolvedDocumentResources(html: string, baseHref: string): string {
       }
     }
   }
+  withCorsIntegrityChecks(parsed, baseHref);
   const fragmentLinks = parsed.createElement("script");
   fragmentLinks.textContent = `(${installFragmentLinks.toString()})();`;
   parsed.body.append(fragmentLinks);
   const doctype = doctypeTag.exec(html)?.[0] ?? "";
   return `${doctype}${parsed.documentElement.outerHTML}`;
+}
+
+/**
+ * Opened directly, a version's own `<script integrity>` or
+ * `<link integrity>` is same-origin, so the browser can check its hash. In
+ * Review the document has an opaque origin and the same file is cross-origin;
+ * without CORS mode the browser refuses to check the hash and blocks the file.
+ * The preview host answers every file with `Access-Control-Allow-Origin: *`
+ * and needs no credential, so an anonymous CORS request fetches the same URL
+ * and the same bytes. Resources on any other origin keep their authored
+ * attributes, so Review never loads something the page could not load itself.
+ */
+function withCorsIntegrityChecks(parsed: Document, baseHref: string): void {
+  const versionOrigin = new URL(baseHref).origin;
+  for (const element of parsed.querySelectorAll("script[integrity], link[integrity]")) {
+    if (element.hasAttribute("crossorigin")) continue;
+    const attribute = element.localName === "script" ? "src" : "href";
+    const value = element.getAttribute(attribute);
+    if (value === null) continue;
+    try {
+      if (new URL(value, baseHref).origin !== versionOrigin) continue;
+    } catch {
+      continue;
+    }
+    element.setAttribute("crossorigin", "anonymous");
+  }
 }

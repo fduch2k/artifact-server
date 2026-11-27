@@ -975,6 +975,34 @@ requirements:
     depends_on: []
     evidence: []
 
+  - id: CNT-010
+    kind: behavior
+    behavior: Review loads a version's own files as the version's origin would; a missing file on the preview host is a readable cross-origin 404, and a same-version script or stylesheet with an integrity hash is fetched in CORS mode so its hash is checked, while the sandbox flags and review-frame policy are unchanged and resources on other origins keep their authored attributes.
+    owner: content-delivery
+    source: {file: decisions/0044-review-entry-loading.md, anchor: decision}
+    acceptance:
+      behavior: {id: CNT-010-B, description: "A synthetic exported viewer whose runtime is pinned by an integrity hash and which probes for a missing _files.json reaches the same empty state in Review as opened directly, and renders its slides in Review when the version carries its own listing; a missing file on the preview host answers 404 VERSION_NOT_FOUND with Access-Control-Allow-Origin *, private no-store, and no cookie."}
+      failure: {id: CNT-010-F, description: "In Review a same-version script with a wrong integrity hash stays blocked, a foreign-origin integrity script keeps its authored attributes and stays blocked, the sandbox stays allow-scripts only, the review-frame Content-Security-Policy is byte-for-byte unchanged, a forged preview lease is still refused before any file lookup, and the exact-version host's not-found gains no CORS header."}
+    deployments: *all
+    status: implementing
+    proof_gap: CNT-010-B and CNT-010-F run in local Chromium against the SQLite server with synthetic fixtures. The real exported deck from the originating issue was not run, so it is not shown that it renders or reaches its empty state in Review; it also starts workers, which Review cannot run. No Firefox, WebKit, external-storage, or deployment evidence is recorded.
+    depends_on: [CMT-014, CMT-018]
+    evidence: []
+
+  - id: CNT-011
+    kind: behavior
+    behavior: When the artifact document in Review has not fired load within a bounded time, Review says so over the preview, keeps the page visible, offers the raw artifact and to keep waiting, and clears the notice once the page finishes; artifact code cannot hide the notice.
+    owner: web-application
+    source: {file: decisions/0044-review-entry-loading.md, anchor: decision}
+    acceptance:
+      behavior: {id: CNT-011-B, description: "An entry page whose image request never completes shows a notice naming the entry path within the bound while the page stays visible; Open raw artifact opens the version itself, Keep waiting dismisses the notice, and after a reload the notice clears when the image request finally completes."}
+      failure: {id: CNT-011-F, description: "A page that finishes loading shows no notice after the bound has passed, and a stalled page that posts forged load messages to its parent and to the application document still gets the notice."}
+    deployments: *all
+    status: implementing
+    proof_gap: CNT-011-B and CNT-011-F run in local Chromium against the SQLite server. A page that fires load but then never renders, such as one waiting on a worker Review cannot start, gets no notice; that case is outside this requirement. No Firefox, WebKit, or deployment evidence is recorded.
+    depends_on: [CMT-014, CNT-010]
+    evidence: []
+
   - id: VER-001
     kind: behavior
     behavior: Each intentional publish creates a new immutable version, the stable artifact link opens the current version, and an exact version link never changes.

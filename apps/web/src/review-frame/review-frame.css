@@ -14,6 +14,11 @@ body,
   height: 100%;
 }
 
+/* Only an event boundary for the artifact's load; it adds no box to lay out. */
+.review-frame-surface {
+  display: contents;
+}
+
 /*
  * An artifact renders on the canvas a plain tab would give it. The browser
  * leaves an embedded document's canvas transparent when the document's color

@@ -3,7 +3,7 @@ import {
   type Annotation,
   type ViewerHandle,
 } from "@plannotator/ui/components/html-viewer";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { withBaseHref } from "./base-href.ts";
 import {
@@ -76,11 +76,27 @@ export function ReviewFrame(): React.ReactNode {
   const [session, setSession] = useState<ReviewSession | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const viewerRef = useRef<ViewerHandle | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const paintedIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
 
   const send = useCallback((message: FrameMessage): void => {
     window.parent.postMessage(message, window.location.origin);
   }, []);
+
+  // `load` does not bubble, but it does pass this ancestor in the capture
+  // phase. Listening here, before the viewer commits its sandbox iframe,
+  // sees the artifact document finish loading without running any code in
+  // it. The host owns the decision about how long is too long.
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+    if (surface === null || window.parent === window) return undefined;
+    const onLoad = (event: Event): void => {
+      if (!(event.target instanceof HTMLIFrameElement)) return;
+      send({type: "as-review-entry-loaded", v: reviewProtocolVersion});
+    };
+    surface.addEventListener("load", onLoad, true);
+    return () => surface.removeEventListener("load", onLoad, true);
+  }, [send]);
 
   useEffect(() => {
     // Framed by the application shell or nothing: a top-level review frame has
@@ -185,40 +201,40 @@ export function ReviewFrame(): React.ReactNode {
     });
   }, [send]);
 
-  if (session === null) {
-    return (
-      <p className="p-4 text-sm text-muted-foreground" role="status">
-        Waiting for the artifact to load.
-      </p>
-    );
-  }
-
   return (
-    <HtmlViewer
-      annotateModeActive={session.annotateModeActive}
-      annotations={session.annotations}
-      fullViewport
-      hideControls
-      inputMethod="pinpoint"
-      // A text selection first offers Copy and Comment and keeps focus on
-      // the artifact, so a reader can copy what they selected. "comment"
-      // would open the composer on every selection and take focus with it.
-      // A pinpoint click still opens the composer directly in both modes.
-      mode="selection"
-      onAddAnnotation={handleAdd}
-      onAnnotateModeExit={session.supportsAnnotateMode
-        ? () => requestAnnotateMode(false)
-        : undefined}
-      onAnnotateModeToggle={session.supportsAnnotateMode
-        ? () => requestAnnotateMode(!session.annotateModeActive)
-        : undefined}
-      onSelectAnnotation={handleSelect}
-      onUnanchoredChange={handleUnanchored}
-      rawHtml={session.html}
-      readOnly={session.readOnly}
-      ref={viewerRef}
-      selectedAnnotationId={selectedThreadId}
-      title={`Artifact review: ${session.entryPath}`}
-    />
+    <div className="review-frame-surface" ref={surfaceRef}>
+      {session === null ? (
+        <p className="p-4 text-sm text-muted-foreground" role="status">
+          Waiting for the artifact to load.
+        </p>
+      ) : (
+        <HtmlViewer
+          annotateModeActive={session.annotateModeActive}
+          annotations={session.annotations}
+          fullViewport
+          hideControls
+          inputMethod="pinpoint"
+          // A text selection first offers Copy and Comment and keeps focus on
+          // the artifact, so a reader can copy what they selected. "comment"
+          // would open the composer on every selection and take focus with it.
+          // A pinpoint click still opens the composer directly in both modes.
+          mode="selection"
+          onAddAnnotation={handleAdd}
+          onAnnotateModeExit={session.supportsAnnotateMode
+            ? () => requestAnnotateMode(false)
+            : undefined}
+          onAnnotateModeToggle={session.supportsAnnotateMode
+            ? () => requestAnnotateMode(!session.annotateModeActive)
+            : undefined}
+          onSelectAnnotation={handleSelect}
+          onUnanchoredChange={handleUnanchored}
+          rawHtml={session.html}
+          readOnly={session.readOnly}
+          ref={viewerRef}
+          selectedAnnotationId={selectedThreadId}
+          title={`Artifact review: ${session.entryPath}`}
+        />
+      )}
+    </div>
   );
 }

@@ -3255,6 +3255,49 @@ select:focus-visible {
   padding: 0.2rem 0.4rem;
 }
 
+.as-preview-stalled {
+  align-items: center;
+  background: color-mix(in oklab, var(--as-gold) 14%, var(--as-surface));
+  border-bottom: 1px solid color-mix(in oklab, var(--as-gold) 38%, transparent);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  justify-content: space-between;
+  left: 0;
+  padding: 0.6rem 0.75rem;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 4;
+}
+
+.as-preview-stalled__text {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.as-preview-stalled__text strong {
+  font-size: 0.85rem;
+}
+
+.as-preview-stalled__text p {
+  color: var(--as-subtle);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0.2rem 0 0;
+}
+
+.as-preview-stalled__text code {
+  font-family: "Atkinson Hyperlegible Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.as-preview-stalled__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .as-preview-welcome,
 .as-preview-state {
   align-items: center;
