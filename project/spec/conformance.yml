@@ -985,7 +985,7 @@ requirements:
       failure: {id: CNT-010-F, description: "In Review a same-version script with a wrong integrity hash stays blocked, a foreign-origin integrity script keeps its authored attributes and stays blocked, the sandbox stays allow-scripts only, the review-frame Content-Security-Policy is byte-for-byte unchanged, a forged preview lease is still refused before any file lookup, and the exact-version host's not-found gains no CORS header."}
     deployments: *all
     status: implementing
-    proof_gap: CNT-010-B and CNT-010-F run in local Chromium against the SQLite server with synthetic fixtures. The real exported deck from the originating issue was not run, so it is not shown that it renders or reaches its empty state in Review; it also starts workers, which Review cannot run. No Firefox, WebKit, external-storage, or deployment evidence is recorded.
+    proof_gap: CNT-010-B and CNT-010-F run in local Chromium against the SQLite server with synthetic fixtures. A manual local run of the real exported deck from the originating issue (recorded in ADR 0044) showed the readable 404 working but the deck still not rendering in Review, because it needs blob workers and runtime-inserted integrity scripts that the sandbox blocks; that run is not an automated test. No Firefox, WebKit, external-storage, or deployment evidence is recorded.
     depends_on: [CMT-014, CMT-018]
     evidence: []
 

@@ -35,8 +35,32 @@ The page still fired `load` in about 170 ms. None of these blocks `load` on
 its own. The first row fits the symptom exactly: a viewer that treats a
 missing listing (404) as "no slides" and a network failure as "wait" ends in
 its empty state when opened directly and keeps its skeleton in Review. The
-real export was not run here, so this is the best-supported cause, not a
-proven one, and the export also uses workers.
+synthetic page made it the best-supported cause. The run on the real export
+below shows that it is not the only one, and not the one that keeps that
+deck from rendering.
+
+### Result on the real export
+
+The real export was then published to a local server and opened in Review in
+Chromium, once on the integration build before this decision and once with
+it, with a screenshot after 25 seconds and the console logged.
+
+| Observation | Before this decision | With this decision |
+| --- | --- | --- |
+| `_files.json` | CORS failure; the viewer logs a transient boot read error | readable 404 |
+| Runtime-inserted `<script integrity>` for the editor bundle, and its retry with a query suffix | blocked by SRI | still blocked by SRI: the script is created by the runtime after rendering, so the `crossorigin` rewrite never sees it |
+| `blob:` workers | blocked by `script-src`, the `worker-src` fallback | blocked the same way |
+| Document `load` | fires | fires, so the stalled-page notice never appears |
+| What the reviewer sees at 25 s | the viewer's skeleton and its own "Couldn't load this presentation" toast, mostly hidden under Review's floating toolbar | identical |
+
+The readable 404 and the integrity rewrite work as specified, but they do not
+change the outcome for this export: it needs `blob:` workers and dynamically
+inserted integrity-pinned scripts, and both stay blocked by the sandbox
+boundary this decision keeps. It also tries to post to its originating
+platform's host, which fails, as expected, outside that platform. Issue #17 is
+therefore not fixed by this decision for that kind of export; what it fixes is
+the general mismatch between Review and the version's own origin, and the
+missing signal for pages that never finish loading.
 
 ## Decision
 
@@ -81,12 +105,27 @@ before.
 
 - A page that probes for optional files reaches the same state in Review as
   opened directly instead of waiting on a network error.
-- A version whose runtime is pinned by integrity hashes runs in Review.
+- A version whose runtime is pinned by integrity hashes in its HTML runs in
+  Review. Integrity-pinned scripts the runtime inserts later are still
+  blocked.
 - A slow page that is still working gets the notice after 15 seconds; Keep
   waiting dismisses it for that view.
 - A page that fires `load` but then waits forever on something else, such as
   a worker that Review cannot start, still gets no notice. Review cannot tell
   "rendered" from "still drawing" for arbitrary HTML.
+- Exported decks of the kind in issue #17 still do not render in Review and
+  still show their skeleton, with the viewer's own error toast. Their authors
+  should publish a static export (PDF, or plain HTML of the slides) instead.
+
+## Open follow-ups
+
+- Review's floating toolbar covers the top of the artifact, where pages tend
+  to put their own status and error messages; the export's "Couldn't load"
+  toast was mostly hidden under it.
+- Whether Review should run `blob:` workers, and whether it should apply the
+  `crossorigin` rewrite to integrity-pinned scripts the runtime inserts
+  later. Both change the sandbox boundary (CMT-014) and need their own
+  decision with a security review; the real export needs both.
 
 ## Not part of this decision
 
@@ -100,13 +139,14 @@ before.
 - **Serve a synthesized `_files.json` per version from the manifest** (the
   issue's first option). It would let such a deck render when the listing is
   its only blocker, and the version's own `_files.json` would win. Rejected
-  for now: the real export was not run, so it is not shown that the listing is
-  its only blocker (it also starts workers, which Review cannot run); it adds
+  for now: the run on the real export shows the listing is not its only
+  blocker (it also needs `blob:` workers and runtime-inserted integrity
+  scripts, which Review blocks), so serving it would not make the deck
+  render; it adds
   a reserved path to every version to match one other platform's convention;
   and on public-link hosts it would publish a full file list where today a
-  visitor needs the paths. The readable 404 above already turns the stall
-  into the viewer's own empty state. Revisit with the export in hand, scoped
-  to preview hosts.
+  visitor needs the paths. Revisit only together with the sandbox decision in
+  the follow-ups, scoped to preview hosts.
 - **Allow `worker-src blob:` and `frame-src` for content hosts in the
   review-frame policy.** Changes what artifact code can do inside the sandbox;
   out of scope without its own security review.
