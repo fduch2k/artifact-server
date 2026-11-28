@@ -231,7 +231,7 @@ async function expectToolbarIconsVisible(review: OpenReview): Promise<void> {
     }));
   };
 
-  await expect.poll(async () => Object.keys(await contrast())).toEqual(["Copy", "Comment", "Cancel"]);
+  await expect.poll(async () => Object.keys(await contrast())).toEqual(["Copy", "Comment", "Looks good", "Cancel"]);
   await expect.poll(async () =>
     Object.entries(await contrast()).filter(([, ratio]) => ratio < 3)
   ).toEqual([]);

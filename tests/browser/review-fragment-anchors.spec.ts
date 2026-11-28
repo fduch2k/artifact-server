@@ -146,7 +146,9 @@ test.describe("Review fragment links", () => {
       await expect(review.locator("iframe")).toHaveAttribute("sandbox", "allow-scripts");
       await expect(fixture.page.getByRole("button", {name: /^Annotate mode:/u}))
         .toHaveAttribute("aria-pressed", "true");
-      await preview.locator("#nested-link span").click();
+      // 0.67: a plain click on a link with a destination follows it while
+      // armed; Ctrl/Cmd-click pins it for a comment.
+      await preview.locator("#nested-link span").click({modifiers: ["ControlOrMeta"]});
       const composer = review.getByPlaceholder("Add a comment...");
       await expect(composer).toBeVisible();
       expect(await preview.locator("body").evaluate(() => window.scrollY)).toBe(0);
