@@ -8,7 +8,7 @@
  * `apps/web/tsconfig.json` maps `@plannotator/ui/*` here so the compiler sees
  * this declared contract instead; Vite still bundles the real source.
  *
- * Mirrors @plannotator/ui@0.31.0 with patches/@plannotator__ui@0.31.0.patch:
+ * Mirrors @plannotator/ui@0.67.0 (no local patch):
  *   components/html-viewer/HtmlViewer.tsx:137-181 (HtmlViewerProps)
  *   components/Viewer.tsx:141-145 (ViewerHandle)
  *   types.ts:1-5, 60-125 (AnnotationType, Annotation, anchors)
@@ -72,7 +72,7 @@ export interface HtmlViewerProps {
   /** Live mode: navigate the iframe to this URL instead of building a srcdoc. */
   src?: string | undefined;
   liveSession?: HtmlLiveSession | undefined;
-  /** Sandbox tokens for the live iframe (local patch, ADR 0045). */
+  /** Sandbox tokens for the live iframe (0.67 `liveSandbox`, ADR 0045). */
   liveSandbox?: string | undefined;
   currentPageUrl?: string | undefined;
   onPageChange?: ((pageUrl: string) => void) | undefined;

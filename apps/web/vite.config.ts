@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { tsImport } from "tsx/esm/api";
 import { defineConfig, type Plugin, type ProxyOptions } from "vite";
 import { z } from "zod";
 
@@ -42,7 +43,7 @@ export default defineConfig({
 /**
  * The preview host injects Plannotator's live annotation bridge into the HTML
  * it serves to Review (ADR 0045). The bridge text must be the exact pinned and
- * patched version the review frame is built against, so the build copies it
+ * version the review frame is built against, so the build copies it
  * out of the dependency into `review-bridge.json`, which the server reads from
  * the web assets. The module is plain string constants with no imports.
  */
@@ -62,11 +63,12 @@ function reviewBridgeAsset(): Plugin {
       if (resolved === null) {
         this.error("Artifact Server could not resolve the Plannotator bridge script.");
       }
-      const source = await readFile(resolved.id, "utf8");
-      const encoded = Buffer.from(source, "utf8").toString("base64");
-      const parsed = bridgeModuleSchema.safeParse(await import(
-        /* @vite-ignore */ `data:text/javascript;base64,${encoded}`
-      ));
+      // Since 0.33 the module imports sibling string constants (sandbox
+      // shim, link guard), so it is loaded through tsx, which resolves the
+      // package's extensionless TypeScript imports.
+      const parsed = bridgeModuleSchema.safeParse(
+        await tsImport(pathToFileURL(resolved.id).href, import.meta.url),
+      );
       if (!parsed.success) {
         this.error(`The Plannotator bridge script changed its exports: ${parsed.error.message}`);
       }
