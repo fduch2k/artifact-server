@@ -36,6 +36,9 @@ export const maximumBridgedHtmlBytes = 32 * 1024 * 1024;
 const metaContentSecurityPolicy =
   /<meta\s[^>]*http-equiv\s*=\s*["']?\s*content-security-policy\s*["']?[^>]*\/?>/giu;
 const headClose = /<\/head\s*>/iu;
+const metaTag = /<meta\b[^>]*>/giu;
+const hostThemeName = /\bname\s*=\s*["']?plannotator-theme["']?/iu;
+const hostThemeContent = /\bcontent\s*=\s*["']?host["']?/iu;
 const leadingDoctype = /^\s*<!doctype\b[^>]*>/iu;
 const charsetParameter = /;\s*charset\s*=\s*"?([^";\s]+)"?/iu;
 const metaCharset = /<meta\s[^>]*charset\s*=\s*["']?\s*([a-z0-9_.:-]+)/iu;
@@ -101,6 +104,7 @@ export function injectReviewBridge(
     css: source.css,
     editorOrigins: session.editorOrigins,
     frameDepth: reviewFrameDepth,
+    hostTheme: hasHostThemeOptIn(html),
     token: session.token,
   });
   const script = [
@@ -125,6 +129,18 @@ export function injectReviewBridge(
     return document.slice(0, end) + script + document.slice(end);
   }
   return script + document;
+}
+
+/**
+ * A document that wants Review's theme says so with
+ * `<meta name="plannotator-theme" content="host">`, the viewer's own opt-in.
+ * In `srcdoc` mode the viewer read it from the HTML; live, only the serving
+ * side sees the HTML, so it tells the bridge (CMT-023).
+ */
+function hasHostThemeOptIn(html: string): boolean {
+  return (html.match(metaTag) ?? []).some((tag) =>
+    hostThemeName.test(tag) && hostThemeContent.test(tag)
+  );
 }
 
 /** JSON that cannot close the surrounding `<script>` or break a JS string. */

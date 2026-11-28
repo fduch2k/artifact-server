@@ -1571,10 +1571,12 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       new URL("index.html", previewLease.baseUrl).toString(),
     );
     expect(historicalPreview.status).toBe(200);
-    expect(historicalPreview.headers.get("access-control-allow-origin")).toBe("*");
+    // Review reads the lease host same-origin (ADR 0045): no CORS grant, and
+    // HTML may carry the live annotation bridge when the web build is present.
+    expect(historicalPreview.headers.get("access-control-allow-origin")).toBeNull();
     expect(historicalPreview.headers.get("cross-origin-resource-policy"))
       .toBe("cross-origin");
-    expect(await historicalPreview.text()).toBe("<p>repository version one</p>");
+    expect(await historicalPreview.text()).toContain("<p>repository version one</p>");
     const forgedPreviewUrl = new URL("index.html", previewLease.baseUrl);
     const [leaseLabel, ...contentDomainLabels] = forgedPreviewUrl.hostname.split(".");
     if (leaseLabel === undefined) throw new Error("Preview lease hostname has no label.");

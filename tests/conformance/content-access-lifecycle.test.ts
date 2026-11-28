@@ -218,6 +218,76 @@ describe("content access lifecycle", () => {
       ));
   });
 
+  test("CNT-014-F: renewal slides an unexpired lease by its lifetime, and an expired, foreign, or cross-version lease cannot be renewed", async () => {
+    expect.hasAssertions();
+    const published = await publishPrivateArtifact(runtime);
+    const other = await publishPrivateArtifact(runtime);
+    const issue = () => runtime.runPromise(
+      ContentAccessService.use((contentAccess) =>
+        contentAccess.issuePreviewLease({
+          artifactId: published.artifact.id,
+          principal: testPrincipal,
+          projectId: null,
+          versionId: published.version.id,
+        })
+      ),
+    );
+    const renew = (token: Redacted.Redacted, principal: Principal = testPrincipal, target = published) =>
+      ContentAccessService.use((contentAccess) =>
+        contentAccess.renewPreviewLease({
+          artifactId: target.artifact.id,
+          principal,
+          projectId: null,
+          token,
+          versionId: target.version.id,
+        })
+      );
+    const lease = await issue();
+    const issuedAt = clock.now().getTime();
+    expect(Date.parse(lease.expiresAt) - issuedAt).toBe(15 * 60_000);
+
+    // Ten minutes in, renewal moves expiry to fifteen minutes from now, and
+    // the lease keeps serving past its original expiry.
+    clock.set(new Date(issuedAt + 10 * 60_000));
+    const renewed = await runtime.runPromise(renew(lease.token));
+    expect(renewed.versionId).toBe(published.version.id);
+    expect(Date.parse(renewed.expiresAt)).toBe(issuedAt + 25 * 60_000);
+    clock.set(new Date(issuedAt + 20 * 60_000));
+    const served = await runtime.runPromise(
+      ContentAccessService.use((contentAccess) =>
+        contentAccess.authorizePreviewContent({fallback: "entry", path: "", token: lease.token})
+      ),
+    );
+    expect(served?.versionId).toBe(published.version.id);
+
+    // The same lease through another artifact's route, or held by another
+    // principal, is not this caller's lease to renew.
+    await expectFailure("PreviewLeaseExpired", renew(lease.token, testPrincipal, other));
+    await expectFailure("PreviewLeaseExpired", renew(lease.token, {
+      ...testPrincipal,
+      id: "another-service-principal",
+    }));
+    await expectFailure("PreviewLeaseExpired", renew(Redacted.make("not-a-review-lease")));
+
+    // Once expired, the lease stays expired: Review must take a new one.
+    clock.set(new Date(issuedAt + 25 * 60_000));
+    await expectFailure("PreviewLeaseExpired", renew(lease.token));
+    await expectFailure("ContentSessionRequired",
+      ContentAccessService.use((contentAccess) =>
+        contentAccess.authorizePreviewContent({fallback: "entry", path: "", token: lease.token})
+      ));
+
+    // The bridge token is per lease and stable for that lease.
+    const next = await issue();
+    expect(next.bridgeToken).not.toBe(lease.bridgeToken);
+    const derived = await runtime.runPromise(
+      ContentAccessService.use((contentAccess) =>
+        Effect.succeed(contentAccess.previewBridgeToken(next.token))
+      ),
+    );
+    expect(derived).toBe(next.bridgeToken);
+  });
+
   async function expectFailure<A, E extends {_tag: string}>(
     expectedTag: E["_tag"],
     effect: Effect.Effect<A, E, ContentAccessService>,

@@ -298,7 +298,7 @@ describe("private content sessions", () => {
     const exact = await fetchVersion(server, lease.baseUrl);
     expect(exact.status).toBe(200);
     expect(await exact.text()).toContain("Lease version one");
-    expect(exact.headers.get("access-control-allow-origin")).toBe("*");
+    expect(exact.headers.get("access-control-allow-origin")).toBeNull();
     expect(exact.headers.get("cache-control")).toBe("private, no-store");
     expect(exact.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
     expect(exact.headers.get("referrer-policy")).toBe("no-referrer");

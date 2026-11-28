@@ -52,7 +52,7 @@ const anchorArtifact = `<!doctype html>
 </html>`;
 
 test.describe("Review fragment links", () => {
-  test("CMT-022-B CMT-022-F: fragment links scroll within the sandbox and tolerate invalid targets without navigation", async ({browser}) => {
+  test("CMT-022-B CMT-022-F: fragment links scroll within the preview document and tolerate invalid targets without leaving it", async ({browser}) => {
     const fixture = await startBrowserFixture(browser);
     try {
       const published = await publishNew(fixture.server, fixture.installation, {
@@ -70,16 +70,17 @@ test.describe("Review fragment links", () => {
       const review = fixture.page.frameLocator(".as-artifact-frame");
       const preview = review.frameLocator("iframe");
       await expect(preview.locator("h1")).toHaveText("Fragment links remain in the preview");
-      await expect(review.locator("iframe")).toHaveAttribute("sandbox", "allow-scripts");
-      const contentBase = await preview.locator("base").getAttribute("href");
-      expect(contentBase).toMatch(/^http:\/\/review-[a-f0-9]+\.localhost:\d+\/$/u);
+      // Since ADR 0045 the version runs on its preview lease origin, so the
+      // browser handles fragment links natively, as on the raw link.
+      await expect(review.locator("iframe"))
+        .toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
       await preview.locator("#nested-link").focus();
       await fixture.page.keyboard.press("Escape");
       await expect(fixture.page.getByRole("button", {name: /^Interact mode:/u}))
         .toHaveAttribute("aria-pressed", "false");
       const reviewUrl = fixture.page.url();
       const previewUrl = await preview.locator("body").evaluate(() => window.location.href);
-      expect(previewUrl).toBe("about:srcdoc");
+      expect(previewUrl).toMatch(/^http:\/\/review-[a-f0-9]+\.localhost:\d+\/$/u);
 
       const navigations: string[] = [];
       const documentRequests: string[] = [];
@@ -118,11 +119,14 @@ test.describe("Review fragment links", () => {
       await expectTargetAtTop(preview, "#section");
 
       await expect(preview.locator("h1")).toHaveText("Fragment links remain in the preview");
-      expect(navigations).toEqual([]);
+      // Fragment links only move within the same document: no request, and
+      // every navigation the frame reports is the same URL with a fragment.
+      expect(navigations.every((url) => url.startsWith(previewUrl))).toBe(true);
       expect(documentRequests).toEqual([]);
       expect(browserErrors).toEqual([]);
       expect(fixture.page.url()).toBe(reviewUrl);
-      expect(await preview.locator("body").evaluate(() => window.location.href)).toBe(previewUrl);
+      expect(await preview.locator("body").evaluate(() => window.location.href))
+        .toMatch(new RegExp(`^${previewUrl.replaceAll(".", "\\.")}(#.*)?$`, "u"));
     } finally {
       await stopBrowserFixture(fixture);
     }
@@ -143,7 +147,8 @@ test.describe("Review fragment links", () => {
       );
       const review = fixture.page.frameLocator(".as-artifact-frame");
       const preview = review.frameLocator("iframe");
-      await expect(review.locator("iframe")).toHaveAttribute("sandbox", "allow-scripts");
+      await expect(review.locator("iframe"))
+        .toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
       await expect(fixture.page.getByRole("button", {name: /^Annotate mode:/u}))
         .toHaveAttribute("aria-pressed", "true");
       await preview.locator("#nested-link span").click();

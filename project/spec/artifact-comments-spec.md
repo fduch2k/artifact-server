@@ -319,9 +319,9 @@ Encoded fragments and keyboard activation work; an empty fragment returns to
 the top. Missing or malformed targets cannot navigate to the injected resource
 base URL. Authored element and document click cancellation and Annotate mode
 retain ownership of their gestures. Modified clicks, downloads, and other browsing targets retain
-their authored behavior. This preview behavior changes scrolling and focus,
-without emulating URL hash changes or browser history. It preserves stored
-artifact bytes, relative resource resolution, and the opaque-origin sandbox.
+their authored behavior. Since ADR 0045 the document has a real URL on its
+preview lease origin, so these links are handled by the browser itself, as on
+the raw link, including the URL fragment.
 
 ### HTML preview canvas
 
@@ -428,6 +428,8 @@ an existing dispatch package to remove a deleted thread.
 
 ## 9a. Review viewer architecture
 
+> **Superseded in part by [ADR 0045](decisions/0045-review-live-preview-origin.md).** Review no longer renders the artifact from a `srcdoc` with an injected `<base href>`. It uses the viewer's live mode: the artifact frame (`sandbox="allow-scripts allow-same-origin"`) navigates to the entry on the version's preview lease origin, the preview host inserts the annotation bridge into the HTML it serves, the lease is renewed while the view is open, and comments record the page they were made on. The isolation argument below now rests on that origin holding no application credential rather than on an opaque origin; the lease, frame chain, protocol and anchor rules still apply. The rest of this section is kept as the original design record.
+
 The in-page experience reuses Plannotator's own HTML annotation machinery (`@plannotator/ui@0.30.0`, `components/html-viewer`: `HtmlViewer`, `bridge-script`, `srcdoc`, `useHtmlAnnotation` — a props-driven host surface since 0.29.0). Its security model transplants unchanged: the artifact document is rendered from a **`srcdoc` iframe with `sandbox="allow-scripts"` and no `allow-same-origin`** — an opaque origin holding no credential and no reachable API — with the annotation bridge script and CSS spliced into `<head>` and every bridge message source-checked and shape-validated on both sides. The page DOM is never mutated; hover and pins are fixed-position overlay layers.
 
 The frame chain solves the app-shell CSP problem without weakening it:
@@ -480,7 +482,7 @@ Module `artifact-comments` (new entry in `allowed_modules`). Deployments `*all`.
 | CMT-011 | behavior | Every comment mutation appends an attributed action record with the thread's artifact and version. | A mutation cannot commit without an action record (same transaction). |
 | CMT-012 | behavior | The HTTP API, MCP tools, and web application expose the same operations with the same authorization; `?since=` and cursor paging return every change at least once for a poller that resumes from the time its previous pass started. | MCP and HTTP produce identical results for the same principal; a poll resuming from the previous pass start misses no update. |
 | CMT-013 | security | The version file route serves exact manifest-entry bytes to artifact-read principals with non-renderable headers on the app origin, and never on the content domain. | Anonymous, public-link, and read-incapable-key requests are denied; the response cannot render as a document on the app origin; unknown paths 404 without disclosure. |
-| CMT-014 | security | The review viewer executes artifact HTML only inside an opaque-origin sandboxed document that holds no credential; comment writes happen only in the signed-in app document. | Hostile artifact JavaScript cannot reach the app origin, the comment API, cookies, or storage from inside the viewer. |
+| CMT-014 | security | The review viewer executes artifact HTML only in a sandboxed frame on the version's preview lease origin, which holds no application credential and cannot navigate the top window; comment writes happen only in the signed-in app document (ADR 0045). | Hostile artifact JavaScript cannot read the app or review-frame document, app cookies, or app API responses, cannot navigate the top window, and cannot write a comment. |
 | CMT-015 | behavior | Review routes use the dedicated artifact-first viewport shell, with comments and version navigation closed by default, compact version and linked-source context, responsive on-demand surfaces, sharing, and reversible focus mode. | Management chrome or a permanently open side surface cannot displace the artifact, narrow screens cannot make a docked panel crush the artifact, and focus mode cannot leave the viewer without a visible way back. |
 | CMT-021 | behavior | Review downloads one original file or a path-preserving ZIP of the selected immutable version in standard and full-screen modes. | Unauthorized or mismatched artifact, project, and version requests return no archive; downloading cannot open comments, change the selected version, or leave full-screen mode. |
 

@@ -200,7 +200,7 @@ test.describe("Review entry loading", () => {
     }
   });
 
-  test("CNT-010-F: Review gains no network origin, keeps a wrong integrity hash blocked, and leaves foreign integrity resources as authored", async ({browser}) => {
+  test("CNT-010-F: Review keeps a wrong integrity hash blocked and leaves foreign integrity resources as authored", async ({browser}) => {
     const fixture = await startBrowserFixture(browser);
     try {
       const probeEntry = `<!doctype html>
@@ -235,19 +235,23 @@ test.describe("Review entry loading", () => {
       await localLogin(fixture);
       await fixture.page.goto(review);
 
+      // The version runs on its own lease origin (ADR 0045): its scripts are
+      // same-origin and checked as authored, with no crossorigin rewrite.
       const report = artifactFrame(fixture.page).locator("#report");
       await expect(report).toContainText("tampered:blocked");
       await expect(report).toContainText("foreign:blocked");
-      await expect(report).toContainText("tampered-cors:anonymous");
+      await expect(report).toContainText("tampered-cors:null");
       await expect(report).toContainText("foreign-cors:false");
       await expect(report).not.toContainText("tampered:ran");
 
       const sandbox = fixture.page.frameLocator(".as-artifact-frame").locator("iframe");
-      await expect(sandbox).toHaveAttribute("sandbox", "allow-scripts");
+      await expect(sandbox).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
       const policy = await fixture.page.evaluate(async () => {
         const response = await fetch("/review-frame");
         return response.headers.get("content-security-policy");
       });
+      // The review frame may frame content hosts only; its other directives
+      // are unchanged and no longer govern the artifact document.
       expect(policy).toBe([
         "default-src 'none'",
         "script-src 'self' 'unsafe-inline' http://*.localhost:* https://*.localhost",
@@ -256,6 +260,7 @@ test.describe("Review entry loading", () => {
         "font-src * data:",
         "media-src * data: blob:",
         "connect-src http://*.localhost:* https://*.localhost",
+        "frame-src http://*.localhost:* https://*.localhost",
         "frame-ancestors 'self'",
       ].join("; "));
     } finally {

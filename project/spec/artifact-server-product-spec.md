@@ -164,8 +164,11 @@ The embedded Review viewer does not rely on this top-level cookie. For a private
 or historical multi-file version, the authenticated application issues a
 short-lived preview lease bound to the exact project, artifact, version, and
 viewer. The opaque lease is carried in a dedicated content hostname and permits
-only read requests for paths in that immutable version. Review injects that
-origin as the document base, so relative assets load without exposing an
+only read requests for paths in that immutable version. Review opens the
+version's entry on that origin in a sandboxed frame and the preview host adds
+its annotation bridge to the HTML it serves
+([ADR 0045](decisions/0045-review-live-preview-origin.md)), so relative assets,
+routers, storage, and workers work without exposing an
 application session or granting cross-version access. Raw links continue to use
 the bootstrap and content-cookie flow above.
 

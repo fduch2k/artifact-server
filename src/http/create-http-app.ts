@@ -4132,6 +4132,7 @@ async function serveBridgedPreviewDocument(
     "Content-Disposition": content.entry.disposition,
     "Content-Length": String(body.byteLength),
     "Content-Type": "text/html; charset=utf-8",
+    "Cross-Origin-Resource-Policy": "cross-origin",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "X-Robots-Tag": "noindex, nofollow",

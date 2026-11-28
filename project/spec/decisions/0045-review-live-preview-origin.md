@@ -121,10 +121,21 @@ hosts. It no longer governs the artifact document, which is a navigation, not
 a `srcdoc` child, and runs under its own response headers as on the raw link.
 
 `@plannotator/ui` 0.31 renders live mode without any `sandbox` and lets the
-bridge run only when its parent is the top window. A pinned patch adds a
-`liveSandbox` prop and makes the bridge's frame gate compare its depth with
-the configured depth, so nested frames inside the artifact still do not run
-it.
+bridge run only when its parent is the top window. A pinned patch
+(`patches/@plannotator__ui@0.31.0.patch`):
+
+- adds a `liveSandbox` prop for the live iframe;
+- makes the bridge's frame gate compare its depth with the configured depth,
+  so nested frames inside the artifact still do not run it;
+- lets a live document's host-theme opt-in
+  (`<meta name="plannotator-theme" content="host">`, CMT-023) come from the
+  served configuration, since the viewer no longer sees the HTML; the preview
+  host reads the meta tag when it injects;
+- stops the viewer posting to the live iframe while it is still its initial
+  `about:blank`, and lets the bridge post only to the parent origin the
+  browser reports in `location.ancestorOrigins`, so neither side logs
+  target-origin mismatches. Messages skipped before the bridge is ready are
+  re-sent when it reports ready, as the viewer already does.
 
 ### 4. CMT-014 changes from "opaque origin" to "credential-free preview origin"
 

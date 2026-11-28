@@ -31,7 +31,7 @@ describe("preview host answers for missing files", () => {
     await removeTestInstallation(installation);
   });
 
-  test("CNT-010-B CNT-010-F: a missing file on the preview host is a readable cross-origin 404, and nothing else about the host changes", async () => {
+  test("CNT-010-B CNT-010-F: a missing file on the preview host is a private 404 the version reads same-origin, and nothing else about the host changes", async () => {
     const published = await publishNew(server, installation, {
       accessSetting: "account_required",
       content: "<!doctype html><title>Listing probe</title>",
@@ -50,14 +50,14 @@ describe("preview host answers for missing files", () => {
       const missing = await fetchVersion(
         server,
         new URL(missingPath, lease.baseUrl).toString(),
-        "GET",
-        {Origin: "null"},
       );
       return {body: await missing.json(), headers: missing.headers, status: missing.status};
     }));
     for (const missing of answers) {
       expect(missing.status).toBe(404);
-      expect(missing.headers.get("access-control-allow-origin")).toBe("*");
+      // Review runs the version on this origin (ADR 0045), so its own
+      // requests are same-origin and no other origin is granted a read.
+      expect(missing.headers.get("access-control-allow-origin")).toBeNull();
       expect(missing.headers.get("access-control-allow-credentials")).toBeNull();
       expect(missing.headers.get("cache-control")).toBe("private, no-store");
       expect(missing.headers.get("set-cookie")).toBeNull();
@@ -67,8 +67,7 @@ describe("preview host answers for missing files", () => {
     }
 
     // A forged lease is still refused before any file lookup, and a missing
-    // file on the version's own exact-version host keeps its same-origin
-    // answer: only the preview host, which Review reads cross-origin, changes.
+    // file on the version's own exact-version host keeps its answer.
     const forged = new URL(lease.baseUrl);
     forged.hostname = `review-${"x".repeat(40)}.localhost`;
     const forgedMissing = await fetchVersion(server, new URL("_files.json", forged).toString());

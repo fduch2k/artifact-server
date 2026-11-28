@@ -3,6 +3,7 @@ import {expect, test, type Frame, type FrameLocator, type Page} from "@playwrigh
 import {
   commitStagedUpload,
   createStagedUpload,
+  publishNew,
   uploadEveryStagedFile,
   type TestSiteFile,
 } from "../support/publishing.js";
@@ -181,8 +182,8 @@ test.describe("Review runs a version live on its preview origin", () => {
       await expect(artifact.locator("#slide-title")).toHaveText("Title slide");
       await expect(artifact.locator("#deck-status"))
         .toHaveText("visits 1; worker ready; blob worker ready");
-      const document = await artifactDocument(fixture.page);
-      expect(new URL(document.url()).pathname).toBe("/");
+      const artifactPage = await artifactDocument(fixture.page);
+      expect(new URL(artifactPage.url()).pathname).toBe("/");
 
       await commentOn(fixture.page, "#slide-body", "Tighten the title slide.");
 
@@ -192,7 +193,7 @@ test.describe("Review runs a version live on its preview origin", () => {
       await artifact.locator("#next-slide").click();
       await expect(artifact.locator("#slide-title")).toHaveText("Second slide");
       await setAnnotateMode(fixture.page, true);
-      await expect.poll(() => new URL(document.url()).pathname).toBe("/2");
+      await expect.poll(() => new URL(artifactPage.url()).pathname).toBe("/2");
       // The title slide's marker belongs to its page and is not painted here.
       await expect(artifact.locator("[data-plannotator-marker]")).toHaveCount(0);
 
@@ -200,7 +201,7 @@ test.describe("Review runs a version live on its preview origin", () => {
 
       // A reload inside the frame keeps the page (SPA routing serves the entry
       // for /2), the bridge, and the storage on the lease origin.
-      await document.evaluate(() => {
+      await artifactPage.evaluate(() => {
         window.setTimeout(() => location.reload(), 0);
       });
       await expect(artifact.locator("#slide-title")).toHaveText("Second slide");
@@ -226,6 +227,162 @@ test.describe("Review runs a version live on its preview origin", () => {
       await firstComment.getByRole("button", {name: /Show in page/u}).click();
       await expect(artifact.locator("#slide-title")).toHaveText("Title slide");
       await expect(artifact.locator("[data-plannotator-marker]")).toHaveCount(1);
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
+  test("CNT-012-F CMT-014-F: hostile artifact code on the preview origin cannot reach the application, comment, forge the bridge, or navigate the top window", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser);
+    try {
+      const published = await publishNew(fixture.server, fixture.installation, {
+        accessSetting: "account_required",
+        content: "<!doctype html><title>Hostile probe</title><p id=\"probe-target\">Probe target</p>",
+        idempotencyKey: "cnt-012-hostile-artifact",
+        name: "Hostile probe",
+      });
+      const artifactId = published.body.artifact.id;
+      const versionId = published.body.version.id;
+      await localLogin(fixture);
+      const reviewUrl = `${fixture.server.baseUrl}/review?project=prj_default&artifact=${artifactId}&version=${versionId}`;
+      await fixture.page.goto(reviewUrl);
+      await expect(artifactFrame(fixture.page).locator("#probe-target")).toBeVisible();
+      await expect(reviewFrame(fixture.page).locator("iframe"))
+        .toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
+      const artifactPage = await artifactDocument(fixture.page);
+      const applicationOrigin = new URL(fixture.server.baseUrl).origin;
+
+      // Everything below runs as the artifact's own JavaScript, in its realm.
+      const probes = await artifactPage.evaluate(async ({applicationOrigin: appOrigin, artifactId: artifact, versionId: version}) => {
+        const outcome = (run: () => unknown): string => {
+          try {
+            run();
+            return "reached";
+          } catch {
+            return "blocked";
+          }
+        };
+        const reach = async (url: string, init: RequestInit): Promise<string> => {
+          try {
+            const response = await fetch(url, {...init, credentials: "include"});
+            return `read:${response.status}`;
+          } catch {
+            return "blocked";
+          }
+        };
+        const config: unknown = Reflect.get(window, "__plannotatorLiveConfig");
+        const editorOrigins = typeof config === "object" && config !== null
+          ? (Reflect.get(config, "editorOrigins") as string[])
+          : [];
+        const session = await Promise.all(
+          [appOrigin, ...editorOrigins].map((origin) => reach(`${origin}/api/v1/session`, {})),
+        );
+        const comment = await reach(
+          `${appOrigin}/api/v1/artifacts/${artifact}/versions/${version}/comments?projectId=prj_default`,
+          {
+            body: JSON.stringify({anchor: null, body: "Posted by the artifact itself"}),
+            headers: {"Content-Type": "application/json"},
+            method: "POST",
+          },
+        );
+        await fetch(`${appOrigin}/api/v1/artifacts/${artifact}/versions/${version}/comments?projectId=prj_default`, {
+          body: JSON.stringify({anchor: null, body: "Posted blind by the artifact"}),
+          credentials: "include",
+          method: "POST",
+          mode: "no-cors",
+        }).catch(() => undefined);
+        return {
+          comment,
+          cookieNames: document.cookie.split(";").map((part) => part.trim().split("=")[0]).filter(Boolean),
+          opener: window.open("about:blank") === null ? "blocked" : "reached",
+          parent: outcome(() => window.parent.document.title),
+          session,
+          storage: outcome(() => localStorage.setItem("probe", "own origin storage")),
+          top: outcome(() => window.top?.document.title),
+          topNavigation: outcome(() => {
+            if (window.top !== null) window.top.location.href = `${appOrigin}/navigated-by-artifact`;
+          }),
+        };
+      }, {applicationOrigin, artifactId, versionId});
+
+      expect(probes.parent).toBe("blocked");
+      expect(probes.top).toBe("blocked");
+      expect(probes.topNavigation).toBe("blocked");
+      expect(probes.opener).toBe("blocked");
+      expect(probes.session.every((answer) => answer === "blocked")).toBe(true);
+      expect(probes.comment).toBe("blocked");
+      expect(probes.cookieNames).toEqual([]);
+      // Its own origin's storage is what it newly gains (ADR 0045).
+      expect(probes.storage).toBe("reached");
+      expect(fixture.page.url()).toBe(reviewUrl);
+
+      // Bridge and review-frame messages forged without the live token, with
+      // a wrong one, or aimed at the shell's own protocol do nothing.
+      await artifactPage.evaluate(() => {
+        const rect = {bottom: 40, height: 20, left: 10, right: 110, top: 20, width: 100, x: 10, y: 20};
+        const selection = {pinpoint: true, rect, text: "Forged selection", type: "plannotator-bridge-selection"};
+        const submit = {anchor: null, body: "Forged submit", originalText: "", type: "as-review-submit", v: 1};
+        for (const target of [window.parent, window.top]) {
+          if (target === null) continue;
+          target.postMessage(selection, "*");
+          target.postMessage({...selection, token: "not-the-live-token"}, "*");
+          target.postMessage(submit, "*");
+        }
+      });
+      await fixture.page.waitForTimeout(500);
+      await expect(reviewFrame(fixture.page).getByPlaceholder("Add a comment...")).toHaveCount(0);
+
+      // With the live token, which its own realm can read, the artifact can
+      // at most open the composer; posting still needs the reviewer.
+      await artifactPage.evaluate(() => {
+        const config: unknown = Reflect.get(window, "__plannotatorLiveConfig");
+        const token = typeof config === "object" && config !== null ? Reflect.get(config, "token") : "";
+        const rect = {bottom: 40, height: 20, left: 10, right: 110, top: 20, width: 100, x: 10, y: 20};
+        for (const origin of [window.location.origin.replace(/^http:\/\/[^.]+\./u, "http://"), "http://127.0.0.1:" + window.location.port]) {
+          window.parent.postMessage({pinpoint: true, rect, text: "Token selection", token, type: "plannotator-bridge-selection"}, origin);
+        }
+      });
+      // The same message shape with the token does reach the viewer, so the
+      // refusals above were the token check, not a malformed message.
+      await expect(reviewFrame(fixture.page).getByPlaceholder("Add a comment...")).toBeVisible();
+      await fixture.page.waitForTimeout(500);
+      expect(await listThreadsOverApi(fixture, artifactId)).toHaveLength(0);
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
+  test("CNT-012-F: the review frame refuses to load an artifact source on the application origin or off its live origin", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser);
+    try {
+      const published = await publishNew(fixture.server, fixture.installation, {
+        accessSetting: "account_required",
+        content: "<!doctype html><title>Source probe</title><p id=\"probe-target\">Source probe</p>",
+        idempotencyKey: "cnt-012-source-refusal",
+        name: "Source probe",
+      });
+      await localLogin(fixture);
+      await fixture.page.goto(
+        `${fixture.server.baseUrl}/review?project=prj_default&artifact=${published.body.artifact.id}&version=${published.body.version.id}`,
+      );
+      await expect(artifactFrame(fixture.page).locator("#probe-target")).toBeVisible();
+      const applicationOrigin = new URL(fixture.server.baseUrl).origin;
+      const refused = reviewFrame(fixture.page).getByText("Review could not open this version's preview.");
+      for (const source of [
+        {liveOrigin: applicationOrigin, src: `${applicationOrigin}/review`},
+        {liveOrigin: "http://review-a.localhost:1", src: `${applicationOrigin}/review`},
+        {liveOrigin: "null", src: "javascript:alert(1)"},
+      ]) {
+        await fixture.page.evaluate((message) => {
+          const frame = window.document.querySelector<HTMLIFrameElement>(".as-artifact-frame");
+          frame?.contentWindow?.postMessage(
+            {...message, liveToken: "token", type: "as-review-source", v: 1},
+            window.location.origin,
+          );
+        }, source);
+        await expect(refused).toBeVisible();
+        await expect(reviewFrame(fixture.page).locator("iframe")).toHaveCount(0);
+      }
     } finally {
       await stopBrowserFixture(fixture);
     }

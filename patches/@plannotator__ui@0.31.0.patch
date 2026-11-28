@@ -1,8 +1,16 @@
 diff --git a/components/html-viewer/HtmlViewer.tsx b/components/html-viewer/HtmlViewer.tsx
-index 337065dc0d49079e806fd9e09abadf8aec4bd36e..237df3c7d87d3553eb6b28d8a629853311683ac0 100644
+index 337065dc0d49079e806fd9e09abadf8aec4bd36e..327d98cd7af395d5c4e8dc66bcd2b9f8ecbf989b 100644
 --- a/components/html-viewer/HtmlViewer.tsx
 +++ b/components/html-viewer/HtmlViewer.tsx
-@@ -148,6 +148,8 @@ export interface HtmlViewerProps {
+@@ -40,6 +40,7 @@ import { buildSyncNumbering } from "./annotationNumbering";
+ import {
+   MAX_PAGE_URL_LENGTH,
+   rejectsLiveMessage,
++  liveFrameNotYetNavigated,
+   useHtmlAnnotation,
+   type HtmlLiveSession,
+ } from "./useHtmlAnnotation";
+@@ -148,6 +149,8 @@ export interface HtmlViewerProps {
    /** Live session credentials paired with `src`: proxy origin + per-session
     *  token, validated on every inbound message and stamped on every post. */
    liveSession?: HtmlLiveSession;
@@ -11,7 +19,7 @@ index 337065dc0d49079e806fd9e09abadf8aec4bd36e..237df3c7d87d3553eb6b28d8a6298533
    /** Current page (pathname + search) in a live multi-page session. Restore
     *  filters annotations to this page; changing it re-applies the filter. */
    currentPageUrl?: string;
-@@ -218,6 +220,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
+@@ -218,6 +221,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
        rawHtml,
        src,
        liveSession,
@@ -19,7 +27,35 @@ index 337065dc0d49079e806fd9e09abadf8aec4bd36e..237df3c7d87d3553eb6b28d8a6298533
        currentPageUrl,
        onPageChange,
        annotations,
-@@ -820,7 +823,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
+@@ -286,6 +290,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
+       if (!win) return;
+       const live = liveSessionRef.current;
+       if (live) {
++        if (liveFrameNotYetNavigated(win)) return;
+         // Browsers silently drop posts whose targetOrigin does not match the
+         // receiving window (mid-navigation frames); some DOM environments
+         // throw instead, so align with the browser semantics explicitly.
+@@ -679,7 +684,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
+         postToBridge(
+           {
+             type: `${PREFIX}theme`,
+-            tokens: buildThemeTokenPayload(readThemeTokens(), hostTheme),
++            // Live documents declare their own host-theme opt-in through
++            // the served config, so the bridge filters the bare tokens.
++            tokens: buildThemeTokenPayload(readThemeTokens(), liveMode || hostTheme),
+             isLight: isLightTheme(),
+             hostTheme,
+           },
+@@ -692,7 +699,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
+         attributeFilter: ["class", "style"],
+       });
+       return () => observer.disconnect();
+-    }, [iframeReadyVersion, hostTheme]);
++    }, [iframeReadyVersion, hostTheme, liveMode]);
+ 
+     useImperativeHandle(ref, () => ({
+       removeHighlight: hook.removeHighlight,
+@@ -820,7 +827,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                  same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
              <iframe
                ref={iframeRef}
@@ -29,7 +65,7 @@ index 337065dc0d49079e806fd9e09abadf8aec4bd36e..237df3c7d87d3553eb6b28d8a6298533
                  width: "100%",
                  height: fullViewport ? "100%" : `${iframeHeight}px`,
 diff --git a/components/html-viewer/bridge-script.ts b/components/html-viewer/bridge-script.ts
-index 939c91888ae5d5ce64d996acc58fc497da36b599..2922022593bb4ae354d0ec00161d1cfd79b9d111 100644
+index 939c91888ae5d5ce64d996acc58fc497da36b599..ce312f7b3d9bb916ed69eec038263830db0c0111 100644
 --- a/components/html-viewer/bridge-script.ts
 +++ b/components/html-viewer/bridge-script.ts
 @@ -221,7 +221,15 @@ export const BRIDGE_SCRIPT = `(function() {
@@ -49,3 +85,60 @@ index 939c91888ae5d5ce64d996acc58fc497da36b599..2922022593bb4ae354d0ec00161d1cfd
    // The server cannot know which origin form (localhost or 127.0.0.1) the
    // editor tab was opened on, so live outbound messages are posted once per
    // listed editor origin: the browser delivers only the post whose
+@@ -238,6 +246,10 @@ export const BRIDGE_SCRIPT = `(function() {
+     if (LIVE) {
+       msg.token = LIVE.token;
+       var origins = LIVE.editorOrigins || [];
++      // Where the browser names the parent's origin, post only there, so the
++      // other listed forms do not each log a target-origin mismatch.
++      var ancestors = location.ancestorOrigins;
++      if (ancestors && ancestors.length > 0 && isEditorOrigin(ancestors[0])) origins = [ancestors[0]];
+       for (var o = 0; o < origins.length; o++) parent.postMessage(msg, origins[o]);
+       return;
+     }
+@@ -295,7 +307,11 @@ export const BRIDGE_SCRIPT = `(function() {
+     if (e.data.type !== PREFIX + 'theme') return;
+     var root = document.documentElement;
+     var tokens = e.data.tokens || {};
+-    var hostTheme = !!e.data.hostTheme;
++    // A live document's opt-in is read by the serving side and carried in
++    // its config, since the parent never sees the document's HTML.
++    var liveHostTheme = !!(LIVE && LIVE.hostTheme);
++    var hostTheme = !!e.data.hostTheme || liveHostTheme;
++    if (liveHostTheme) root.style.setProperty('color-scheme', e.data.isLight ? 'light' : 'dark');
+     for (var key in tokens) {
+       if (!tokens.hasOwnProperty(key)) continue;
+       if (!hostTheme && key.indexOf('--pn-') !== 0) continue;
+diff --git a/components/html-viewer/useHtmlAnnotation.ts b/components/html-viewer/useHtmlAnnotation.ts
+index 3fc2bcc010716539a6c408b651999dcb491daf26..aa4de27e6140007061fd9180fd655bffbc282bde 100644
+--- a/components/html-viewer/useHtmlAnnotation.ts
++++ b/components/html-viewer/useHtmlAnnotation.ts
+@@ -131,6 +131,20 @@ export interface UseHtmlAnnotationOptions {
+   onUnanchoredChange?: (ids: string[]) => void;
+ }
+ 
++/**
++ * True while a live iframe still shows its initial same-origin about:blank.
++ * Posting to it only makes the browser log a target-origin mismatch; the
++ * bridge's ready message re-triggers everything the parent needs to send.
++ */
++export function liveFrameNotYetNavigated(win: Window | null | undefined): boolean {
++  if (!win) return true;
++  try {
++    return win.location.href === "about:blank";
++  } catch {
++    return false;
++  }
++}
++
+ function postToIframe(
+   iframe: HTMLIFrameElement | null,
+   msg: Record<string, unknown>,
+@@ -141,6 +155,7 @@ function postToIframe(
+     // Browsers silently DROP a post whose targetOrigin does not match the
+     // receiving window (mid-navigation frames); some DOM environments throw
+     // instead, so align with the browser semantics explicitly.
++    if (liveFrameNotYetNavigated(iframe?.contentWindow)) return;
+     try {
+       iframe?.contentWindow?.postMessage({ ...msg, token: live.token }, live.origin);
+     } catch {

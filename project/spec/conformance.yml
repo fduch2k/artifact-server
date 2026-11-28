@@ -977,16 +977,16 @@ requirements:
 
   - id: CNT-010
     kind: behavior
-    behavior: Review loads a version's own files as the version's origin would; a missing file on the preview host is a readable cross-origin 404, and a same-version script or stylesheet with an integrity hash is fetched in CORS mode so its hash is checked, while the sandbox flags and review-frame policy are unchanged and resources on other origins keep their authored attributes.
+    behavior: Review loads a version's own files as the version's origin would; the document runs on its preview lease origin, so its own files, a missing file's 404, and its integrity-pinned scripts are same-origin as on the raw link, and the preview host grants no CORS read to any other origin.
     owner: content-delivery
     source: {file: decisions/0044-review-entry-loading.md, anchor: decision}
     acceptance:
-      behavior: {id: CNT-010-B, description: "A synthetic exported viewer whose runtime is pinned by an integrity hash and which probes for a missing _files.json reaches the same empty state in Review as opened directly, and renders its slides in Review when the version carries its own listing; a missing file on the preview host answers 404 VERSION_NOT_FOUND with Access-Control-Allow-Origin *, private no-store, and no cookie."}
-      failure: {id: CNT-010-F, description: "In Review a same-version script with a wrong integrity hash stays blocked, a foreign-origin integrity script keeps its authored attributes and stays blocked, the sandbox stays allow-scripts only, the review-frame Content-Security-Policy is byte-for-byte unchanged, a forged preview lease is still refused before any file lookup, and the exact-version host's not-found gains no CORS header."}
+      behavior: {id: CNT-010-B, description: "A synthetic exported viewer whose runtime is pinned by an integrity hash and which probes for a missing _files.json reaches the same empty state in Review as opened directly, and renders its slides in Review when the version carries its own listing; a missing file on the preview host answers 404 VERSION_NOT_FOUND with private no-store and no cookie."}
+      failure: {id: CNT-010-F, description: "In Review a same-version script with a wrong integrity hash stays blocked, a foreign-origin integrity script stays blocked, a forged preview lease is still refused before any file lookup, and neither the preview host's nor the exact-version host's not-found carries a CORS header."}
     deployments: *all
     status: implementing
-    proof_gap: CNT-010-B and CNT-010-F run in local Chromium against the SQLite server with synthetic fixtures. A manual local run of the real exported deck from the originating issue (recorded in ADR 0044) showed the readable 404 working but the deck still not rendering in Review, because it needs blob workers and runtime-inserted integrity scripts that the sandbox blocks; that run is not an automated test. No Firefox, WebKit, external-storage, or deployment evidence is recorded.
-    depends_on: [CMT-014, CMT-018]
+    proof_gap: CNT-010-B and CNT-010-F run in local Chromium against the SQLite server with synthetic fixtures. ADR 0045 replaced the opaque-origin mechanisms of ADR 0044 (integrity crossorigin rewrite, readable cross-origin 404) with running the version on its lease origin; the real exported deck from issue 17 has not been re-run under ADR 0045. No Firefox, WebKit, external-storage, or deployment evidence is recorded.
+    depends_on: [CMT-014, CMT-018, CNT-012]
     evidence: []
 
   - id: CNT-011
@@ -999,8 +999,50 @@ requirements:
       failure: {id: CNT-011-F, description: "A page that finishes loading shows no notice after the bound has passed, and a stalled page that posts forged load messages to its parent and to the application document still gets the notice."}
     deployments: *all
     status: implementing
-    proof_gap: CNT-011-B and CNT-011-F run in local Chromium against the SQLite server. A page that fires load but then never renders, such as one waiting on a worker Review cannot start, gets no notice; that case is outside this requirement. No Firefox, WebKit, or deployment evidence is recorded.
+    proof_gap: CNT-011-B and CNT-011-F run in local Chromium against the SQLite server. A page that fires load but then never renders gets no notice; that case is outside this requirement. No Firefox, WebKit, or deployment evidence is recorded.
     depends_on: [CMT-014, CNT-010]
+    evidence: []
+
+  - id: CNT-012
+    kind: security
+    behavior: Review runs an HTML entry live on its version's preview lease origin in a frame sandboxed to allow-scripts allow-same-origin, so client-side routers, browser storage, URL and blob workers, and reloads work as on the raw link; comments record the page they were made on and are shown only on that page, and Show in page opens it; artifact code still cannot obtain an application credential, write a comment, drive the review surface without the reviewer, or navigate the top window.
+    owner: artifact-comments
+    source: {file: decisions/0045-review-live-preview-origin.md, anchor: decision}
+    acceptance:
+      behavior: {id: CNT-012-B, description: "A synthetic deck with a history router that rewrites its URL at startup, unguarded localStorage at startup, a URL worker, a blob worker, and three pages renders in Review, navigates to another page, survives a reload of the artifact frame on a deep path with its storage intact, takes comments on two different pages whose anchors carry pageUrl, paints each comment only on its own page, and Show in page on the first page's comment reopens that page."}
+      failure: {id: CNT-012-F, description: "Hostile artifact code in Review cannot read the parent or top document, read application cookies, read or call the application API with credentials, open a window, or navigate the top window; bridge and review-frame messages forged without the live token or with a wrong one are ignored, a token-bearing message can at most open the composer, no comment is stored without the reviewer, and the review frame refuses a source on the application origin, off its live origin, or with a non-http scheme."}
+    deployments: *all
+    status: implementing
+    proof_gap: CNT-012-B and CNT-012-F run in local Chromium against the SQLite server with synthetic fixtures; no real Slidev build is in the suite. Firefox, WebKit, external-storage, and deployment runs are not recorded. Browser enforcement of the sandbox flags and storage partitioning is taken from Chromium only.
+    depends_on: [CMT-014, CMT-018, CNT-013, CNT-014]
+    evidence: []
+
+  - id: CNT-013
+    kind: security
+    behavior: Only the preview lease host inserts the live annotation bridge, with that lease's bridge token, the application's editor origins, and frame depth 2, into the inline HTML documents it serves, including the SPA entry for a framed deep-path navigation; every other file and every exact-version, current, and public-link host serves the stored bytes unchanged.
+    owner: content-delivery
+    source: {file: decisions/0045-review-live-preview-origin.md, anchor: decision}
+    acceptance:
+      behavior: {id: CNT-013-B, description: "A SPA version's entry, another HTML file, and a framed navigation to a missing deep path on the preview host carry the bridge configuration with the lease's bridge token and the application origin, inserted before </head> after the document's charset, with an authored CSP meta neutralised, private no-store, no ETag, and no CORS header; its scripts are byte-identical to storage; HEAD returns no body; a second lease has another origin and token."}
+      failure: {id: CNT-013-F, description: "The current public-link version, another of its HTML files, and a private version on its exact-version host with a content session return the stored bytes with their ETag and no bridge, and a forged lease host is refused with 401 and no bridge."}
+    deployments: *all
+    status: implementing
+    proof_gap: CNT-013-B and CNT-013-F run against the local SQLite server with a synthetic bridge from a temporary web root; the browser tests in CNT-012 use the bridge from the real web build. External-storage and deployment hosts are not recorded; the external-storage runtime test was updated but needs Docker, which this run did not have.
+    depends_on: [CMT-018, CNT-004]
+    evidence: []
+
+  - id: CNT-014
+    kind: security
+    behavior: While a Review view is open the application document renews its preview lease, which re-checks that the signed-in principal may read the version and owns that lease for exactly that version and extends it to its 15-minute lifetime from now; an expired, foreign, forged, or cross-version lease is never renewed, and Review then takes a new lease and reopens the page the reviewer was on.
+    owner: artifact-comments
+    source: {file: decisions/0045-review-live-preview-origin.md, anchor: decision}
+    acceptance:
+      behavior: {id: CNT-014-B, description: "Renewing a just-issued lease over HTTP returns 200 with the same version and an expiry no earlier than before and at most 15 minutes ahead, and the lease host keeps serving."}
+      failure: {id: CNT-014-F, description: "With a controlled clock, a lease renewed after 10 minutes is served at 20 minutes and expires at 25; renewal through another artifact's route, by another principal, with a non-lease token, or after expiry fails with PreviewLeaseExpired, and the expired lease is refused; each lease's bridge token is distinct and stable."}
+    deployments: *all
+    status: implementing
+    proof_gap: Renewal is proved at the service level with a controlled clock and over HTTP against SQLite. The Postgres extendPreviewLease query is not run here (no Docker). The browser path that swaps to a new lease after expiry and reopens the last page is implemented but not driven by an automated test.
+    depends_on: [CMT-018]
     evidence: []
 
   - id: VER-001
@@ -2655,21 +2697,17 @@ requirements:
 
   - id: CMT-014
     kind: security
-    behavior: The review viewer executes artifact HTML only inside an opaque-origin sandboxed document that holds no credential, and comment writes happen only in the signed-in application document.
+    behavior: The review viewer executes artifact HTML only in a sandboxed frame on the version's preview lease origin, which holds no application credential and cannot navigate the top window, and comment writes happen only in the signed-in application document.
     owner: artifact-comments
-    source: {file: artifact-comments-spec.md, anchor: conformance-requirements-to-add}
+    source: {file: decisions/0045-review-live-preview-origin.md, anchor: decision}
     acceptance:
-      behavior: {id: CMT-014-B, description: "Review an artifact version in the viewer and observe artifact HTML running in an opaque-origin sandboxed document while every comment write is made by the signed-in application document."}
-      failure: {id: CMT-014-F, description: "Hostile artifact JavaScript inside the viewer cannot reach the application origin, the comment API, cookies, or storage."}
+      behavior: {id: CMT-014-B, description: "Review an artifact version in the viewer and observe artifact HTML running on its preview lease origin in a frame sandboxed to allow-scripts allow-same-origin, while every comment write is made by the signed-in application document."}
+      failure: {id: CMT-014-F, description: "Hostile artifact JavaScript inside the viewer cannot read the application or review-frame document, application cookies, or application API responses, cannot navigate the top window or open windows, and cannot write a comment."}
     deployments: *all
-    status: behavior_verified
+    status: implementing
+    proof_gap: ADR 0045 changed this requirement from an opaque-origin srcdoc document to a credential-free preview origin; the evidence recorded for the former wording no longer applies. The new wording is proved in local Chromium by the review sandbox browser test and CNT-012-F. Firefox, WebKit, and deployment runs are not recorded.
     depends_on: [SEC-001, CMT-013]
-    evidence:
-      - deployment: local
-        tests: [CMT-014-B, CMT-014-F]
-        result: pass
-        run: project/evidence/browser.json
-        recorded_at: "2026-08-26T18:29:39.022Z"
+    evidence: []
 
   - id: CMT-015
     kind: behavior
@@ -2820,7 +2858,7 @@ requirements:
     source: {file: artifact-comments-spec.md, anchor: html-fragment-navigation}
     acceptance:
       behavior: {id: CMT-022-B, description: "In Interact mode, activate nested, encoded, legacy named, and keyboard fragment links and observe the target within the same sandboxed document; empty and top fragments return to the document start with no navigation request."}
-      failure: {id: CMT-022-F, description: "Missing and malformed fragment targets cause no navigation or script error, authored element and document cancellation retains control, and Annotate mode can save a comment on a link without scrolling or weakening the opaque-origin sandbox."}
+      failure: {id: CMT-022-F, description: "Missing and malformed fragment targets cause no navigation or script error, authored element and document cancellation retains control, and Annotate mode can save a comment on a link without scrolling or weakening the Review sandbox (ADR 0045)."}
     deployments: *all
     status: behavior_verified
     proof_gap: Local Chromium production-build evidence proves fragment scrolling, cancellation, annotation ownership, and retained sandbox isolation. Equivalent Firefox, WebKit, and team-deployment evidence remains unrecorded; URL hash and history emulation are outside this contract.
