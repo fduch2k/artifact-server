@@ -15,6 +15,13 @@ import {
   type ReviewAnnotation,
 } from "@/review-frame/protocol";
 
+/**
+ * How long Review waits for the artifact document's `load` before saying it
+ * has not finished. Long enough for a slow but working multi-megabyte page on
+ * a modest connection; short enough that a person is not left guessing.
+ */
+const stalledEntryTimeoutMs = 15_000;
+
 interface PreviewDocument {
   readonly baseHref: string;
   readonly entryPath: string;
@@ -222,6 +229,10 @@ function HtmlPreview({
 }) {
   const [previewDocument, setPreviewDocument] = useState<PreviewDocument | null>(null);
   const [frameReady, setFrameReady] = useState(false);
+  const [initialised, setInitialised] = useState(false);
+  const [entryLoaded, setEntryLoaded] = useState(false);
+  const [stalled, setStalled] = useState(false);
+  const [stallDismissed, setStallDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -285,6 +296,10 @@ function HtmlPreview({
         setFrameReady(true);
         return;
       }
+      if (message.type === "as-review-entry-loaded") {
+        setEntryLoaded(true);
+        return;
+      }
       if (message.type === "as-review-select") {
         onSelectAnnotation(message.threadId);
         return;
@@ -335,7 +350,16 @@ function HtmlPreview({
       type: "as-review-init",
       v: reviewProtocolVersion,
     });
+    setInitialised(true);
   }, [annotateModeActive, annotations, frameReady, isLight, postToFrame, previewDocument, readOnly]);
+
+  // The clock starts when the frame receives the document, so time spent
+  // reading the entry file or waiting for the frame is not charged to it.
+  useEffect(() => {
+    if (!initialised || entryLoaded) return undefined;
+    const timer = window.setTimeout(() => setStalled(true), stalledEntryTimeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [entryLoaded, initialised]);
 
   useEffect(() => {
     if (!initialisedRef.current) return;
@@ -398,12 +422,64 @@ function HtmlPreview({
     );
   }
   return (
-    <iframe
-      className="as-artifact-frame"
-      ref={frameRef}
-      src="/review-frame"
-      title={`${version.version.artifactId} version ${version.version.number}`}
-    />
+    <>
+      <iframe
+        className="as-artifact-frame"
+        ref={frameRef}
+        src="/review-frame"
+        title={`${version.version.artifactId} version ${version.version.number}`}
+      />
+      {stalled && !entryLoaded && !stallDismissed ? (
+        <StalledEntryNotice
+          actions={actions}
+          onKeepWaiting={() => setStallDismissed(true)}
+          path={entry.path}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Review cannot tell a slow page from one that will never finish, so after a
+ * bounded wait it says what it knows and offers the published page itself.
+ * The artifact stays visible underneath: a page that is merely slow keeps
+ * loading, and the notice disappears if it finishes.
+ */
+function StalledEntryNotice({
+  actions,
+  onKeepWaiting,
+  path,
+}: {
+  readonly actions: PreviewActions;
+  readonly onKeepWaiting: () => void;
+  readonly path: string;
+}) {
+  return (
+    <div className="as-preview-stalled" role="alert">
+      <div className="as-preview-stalled__text">
+        <strong>This page has not finished loading</strong>
+        <p>
+          <code>{path}</code> is still loading after {stalledEntryTimeoutMs / 1_000} seconds.
+          Review runs pages in a sandbox without storage, workers, or embedded
+          frames, so a page that needs them may never finish here.
+        </p>
+      </div>
+      <div className="as-preview-stalled__actions">
+        <button className="as-button" onClick={onKeepWaiting} type="button">
+          Keep waiting
+        </button>
+        <button
+          className="as-button as-button--primary"
+          disabled={actions.opening}
+          onClick={actions.onOpenRawArtifact}
+          type="button"
+        >
+          <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
+          {actions.opening ? "Opening…" : "Open raw artifact"}
+        </button>
+      </div>
+    </div>
   );
 }
 

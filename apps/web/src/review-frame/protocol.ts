@@ -110,6 +110,12 @@ export const frameMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("as-review-ready"),
     v: versionSchema,
   }),
+  // The sandboxed artifact document fired `load`. The frame observes this on
+  // its own iframe element, so artifact code can neither send nor suppress it.
+  z.object({
+    type: z.literal("as-review-entry-loaded"),
+    v: versionSchema,
+  }),
   z.object({
     anchor: optionalAnchorSchema,
     body: z.string(),

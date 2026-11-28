@@ -4016,7 +4016,7 @@ async function servePreviewLeaseContent(
     );
   }
   const requestedPath = manifestPathFromUrl(requestUrl.pathname);
-  if (requestedPath === null) return versionNotFoundResponse();
+  if (requestedPath === null) return previewLeaseNotFoundResponse();
   const content = await runHttpApplicationEffect(
     context,
     dependencies,
@@ -4030,8 +4030,25 @@ async function servePreviewLeaseContent(
       })
     ),
   );
-  if (content === null) return versionNotFoundResponse();
+  if (content === null) return previewLeaseNotFoundResponse();
   return serveStoredVersionContent(context, content, false, true, dependencies);
+}
+
+/**
+ * Review renders a version from an opaque-origin sandbox, so every request it
+ * makes to the preview host is cross-origin. Found files already carry
+ * `Access-Control-Allow-Origin: *`; a missing one must too, or a page that
+ * probes for an optional file sees a network error where the same page opened
+ * directly sees 404. Only a holder of a valid lease reaches this answer, and
+ * that holder can already read every file the version has, so letting it read
+ * "not here" as well reveals nothing new.
+ */
+function previewLeaseNotFoundResponse(): Response {
+  const response = versionNotFoundResponse();
+  response.headers.set("Access-Control-Allow-Origin", "*");
+  response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  return response;
 }
 
 async function serveStoredVersionContent(
