@@ -111,9 +111,14 @@ test.describe("Review fragment links", () => {
       await expectTargetAtTop(preview, "#section");
       await preview.locator("#top-link").click();
       await expect.poll(() => preview.locator("body").evaluate(() => window.scrollY)).toBe(0);
+      // 0.67 (ADR 0046): the viewer's bridge takes fragment links before the
+      // page does. The page's own handler still runs, but cancelling the
+      // click no longer keeps the bridge from scrolling to the target.
       await preview.locator("#owned-link").click();
       await expect(preview.locator("#owned-link")).toHaveText("Authored action handled");
-      expect(await preview.locator("body").evaluate(() => window.scrollY)).toBe(0);
+      await expectTargetAtTop(preview, "#section");
+      await preview.locator("#top-link").click();
+      await expect.poll(() => preview.locator("body").evaluate(() => window.scrollY)).toBe(0);
       await preview.locator("#dynamic-link").click();
       await expectTargetAtTop(preview, "#section");
 
@@ -146,7 +151,9 @@ test.describe("Review fragment links", () => {
       await expect(review.locator("iframe")).toHaveAttribute("sandbox", "allow-scripts");
       await expect(fixture.page.getByRole("button", {name: /^Annotate mode:/u}))
         .toHaveAttribute("aria-pressed", "true");
-      await preview.locator("#nested-link span").click();
+      // 0.67: a plain click on a link with a destination follows it while
+      // armed; Ctrl/Cmd-click pins it for a comment.
+      await preview.locator("#nested-link span").click({modifiers: ["ControlOrMeta"]});
       const composer = review.getByPlaceholder("Add a comment...");
       await expect(composer).toBeVisible();
       expect(await preview.locator("body").evaluate(() => window.scrollY)).toBe(0);
@@ -159,6 +166,16 @@ test.describe("Review fragment links", () => {
       expect(threads[0]?.body).toBe("Clarify the section link.");
       expect(threads[0]?.versionId).toBe(published.body.version.id);
       expect(threads[0]?.path).toBe("index.html");
+
+      // A plain click follows the link while armed and opens no composer,
+      // and `#top` returns to the document start there too.
+      await preview.locator("#nested-link span").click();
+      await expectTargetAtTop(preview, "#section");
+      await expect(composer).toBeHidden();
+      await preview.locator("#top-link").click();
+      await expect.poll(() => preview.locator("body").evaluate(() => window.scrollY)).toBe(0);
+      await expect(composer).toBeHidden();
+      expect(await listThreadsOverApi(fixture, published.body.artifact.id)).toHaveLength(1);
     } finally {
       await stopBrowserFixture(fixture);
     }

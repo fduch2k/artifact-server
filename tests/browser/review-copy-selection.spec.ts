@@ -108,6 +108,25 @@ test.describe("Review text selection", () => {
         await stopBrowserFixture(fixture);
       }
     });
+
+    test(`CMT-024-B: Looks good on a text selection in ${mode} mode saves a one-click comment on it (ADR 0046)`, async ({browser}) => {
+      const fixture = await startBrowserFixture(browser);
+      try {
+        const review = await openReview(fixture, mode);
+        const selected = await selectText(fixture.page, review, "#first");
+        // The 0.67 toolbar names this icon button by its tooltip only.
+        await review.reviewFrame.locator(".annotation-toolbar button[title=\"Looks good\"]").click();
+        await expect(review.reviewFrame.getByPlaceholder("Add a comment...")).toHaveCount(0);
+        await expect.poll(async () =>
+          (await listThreadsOverApi(fixture, review.artifactId)).length
+        ).toBe(1);
+        const [thread] = await listThreadsOverApi(fixture, review.artifactId);
+        expect(thread?.body).toContain("Looks good");
+        expect(JSON.stringify(thread?.anchor)).toContain(selected);
+      } finally {
+        await stopBrowserFixture(fixture);
+      }
+    });
   }
 
   test("CMT-024-B: every control on the selection toolbar stands out from the toolbar in the dark and light themes", async ({browser}) => {
@@ -231,7 +250,7 @@ async function expectToolbarIconsVisible(review: OpenReview): Promise<void> {
     }));
   };
 
-  await expect.poll(async () => Object.keys(await contrast())).toEqual(["Copy", "Comment", "Cancel"]);
+  await expect.poll(async () => Object.keys(await contrast())).toEqual(["Copy", "Comment", "Looks good", "Cancel"]);
   await expect.poll(async () =>
     Object.entries(await contrast()).filter(([, ratio]) => ratio < 3)
   ).toEqual([]);

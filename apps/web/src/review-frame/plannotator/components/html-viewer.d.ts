@@ -8,8 +8,8 @@
  * `apps/web/tsconfig.json` maps `@plannotator/ui/*` here so the compiler sees
  * this declared contract instead; Vite still bundles the real source.
  *
- * Mirrors @plannotator/ui@0.31.0:
- *   components/html-viewer/HtmlViewer.tsx:137-181 (HtmlViewerProps)
+ * Mirrors @plannotator/ui@0.67.0:
+ *   components/html-viewer/HtmlViewer.tsx:227-560 (HtmlViewerProps)
  *   components/Viewer.tsx:141-145 (ViewerHandle)
  *   types.ts:1-5, 60-125 (AnnotationType, Annotation, anchors)
  * Only the props this application drives are declared; unused Vim, diff,
@@ -75,6 +75,8 @@ export interface HtmlViewerProps {
   readOnly?: boolean | undefined;
   onUnanchoredChange?: ((ids: string[]) => void) | undefined;
   title?: string | undefined;
+  /** The srcdoc frame's whole `sandbox` value (0.67 default adds `allow-modals`). */
+  sandbox?: string | undefined;
 }
 
 export declare const HtmlViewer: (

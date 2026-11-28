@@ -1003,6 +1003,20 @@ requirements:
     depends_on: [CMT-014, CNT-010]
     evidence: []
 
+  - id: CNT-016
+    kind: behavior
+    behavior: Review renders a single-page app that uses the History API and storage while it starts; a hash router pages and keeps its route across a reload of the frame, a history router pages in memory, storage lives for one load, and none of it moves Review, reaches another document, or widens the scripts-only sandbox.
+    owner: web-application
+    source: {file: decisions/0046-review-on-plannotator-ui-067.md, anchor: decision}
+    acceptance:
+      behavior: {id: CNT-016-B, description: "A synthetic hash-routed deck that reads and writes localStorage and sessionStorage while it starts renders in Review, pages to its second slide at about:srcdoc#/2, keeps that slide after a reload of the frame with its storage counted afresh, and takes a saved comment; a synthetic history-routed deck that calls replaceState while it starts renders, pages twice in memory with the frame address left at about:srcdoc and no script error, and starts over at its first slide after a reload of the frame; Review's own address never changes."}
+      failure: {id: CNT-016-F, description: "The sandbox stays allow-scripts only; a hostile page's pushState to a path or another origin leaves the frame at about:srcdoc and Review where it was, its cookie, parent location, and top location reads throw, alert shows no dialog and window.open opens nothing, what it writes to localStorage and sessionStorage reaches neither the application nor the review frame, and workers from a URL and from a blob do not start while the page keeps running."}
+    deployments: *all
+    status: implementing
+    proof_gap: CNT-016-B and CNT-016-F run in local Chromium against the SQLite server with synthetic decks that follow vue-router's hash and history shapes. A real exported Slidev deck was checked by hand on both routers, not by an automated test. Comments on a single-page app are not tied to a page and are drawn on every page where their anchor matches (issue #18 stays open), a history route is lost on reload, and workers do not run; ADR 0046 records these limits. No Firefox, WebKit, external-storage, or deployment evidence is recorded.
+    depends_on: [CMT-014, CNT-010]
+    evidence: []
+
   - id: VER-001
     kind: behavior
     behavior: Each intentional publish creates a new immutable version, the stable artifact link opens the current version, and an exact version link never changes.
@@ -2815,22 +2829,22 @@ requirements:
 
   - id: CMT-022
     kind: behavior
-    behavior: Ordinary same-frame fragment-only links in HTML Review previews scroll within the rendered document without navigating to the injected resource base or weakening sandbox isolation.
+    behavior: Ordinary same-frame fragment-only links in HTML Review previews, including `#top`, scroll within the rendered document without navigating to the injected resource base or weakening sandbox isolation; in Annotate mode a plain click follows the link and a Ctrl- or Cmd-click pins it for a comment.
     owner: artifact-comments
     source: {file: artifact-comments-spec.md, anchor: html-fragment-navigation}
     acceptance:
-      behavior: {id: CMT-022-B, description: "In Interact mode, activate nested, encoded, legacy named, and keyboard fragment links and observe the target within the same sandboxed document; empty and top fragments return to the document start with no navigation request."}
-      failure: {id: CMT-022-F, description: "Missing and malformed fragment targets cause no navigation or script error, authored element and document cancellation retains control, and Annotate mode can save a comment on a link without scrolling or weakening the opaque-origin sandbox."}
+      behavior: {id: CMT-022-B, description: "In Interact mode, activate nested, encoded, legacy named, and keyboard fragment links and observe the target within the same sandboxed document; empty and top fragments return to the document start with no navigation request; in Annotate mode a plain click on a fragment link and on #top scrolls the same way and opens no composer."}
+      failure: {id: CMT-022-F, description: "Missing and malformed fragment targets cause no navigation or script error, an authored document handler still runs on a fragment link it cancels (the viewer still scrolls, ADR 0046), and in Annotate mode a Ctrl- or Cmd-click saves a comment on a link without scrolling or weakening the opaque-origin sandbox."}
     deployments: *all
     status: behavior_verified
-    proof_gap: Local Chromium production-build evidence proves fragment scrolling, cancellation, annotation ownership, and retained sandbox isolation. Equivalent Firefox, WebKit, and team-deployment evidence remains unrecorded; URL hash and history emulation are outside this contract.
+    proof_gap: Local Chromium production-build evidence on @plannotator/ui 0.67 proves fragment scrolling including `#top`, link following and Ctrl/Cmd-click pinning in Annotate mode, authored handlers still running, and retained sandbox isolation (ADR 0046). Equivalent Firefox, WebKit, and team-deployment evidence remains unrecorded; URL hash and history emulation are outside this contract.
     depends_on: [CMT-014, CMT-018]
     evidence:
       - deployment: local
         tests: [CMT-022-B, CMT-022-F]
         result: pass
-        run: project/evidence/html-fragment-navigation-browser.json
-        recorded_at: "2026-10-06T15:37:19.847Z"
+        run: project/evidence/browser.json
+        recorded_at: "2026-11-28T14:59:52.334Z"
 
   - id: CMT-023
     kind: behavior
@@ -2848,12 +2862,12 @@ requirements:
 
   - id: CMT-024
     kind: behavior
-    behavior: Selecting text in an HTML Review preview keeps the selection and focus on the artifact and offers Copy and Comment, legible in both Review themes, in Annotate and Interact mode; the copy shortcut and the Copy control copy exactly the selection, and a comment starts only from the Comment control or a typed character.
+    behavior: Selecting text in an HTML Review preview keeps the selection and focus on the artifact and offers Copy, Comment, and a one-click Looks good comment, legible in both Review themes, in Annotate and Interact mode; the copy shortcut and the Copy control copy exactly the selection, and a comment starts only from the Comment control, a typed character, or Looks good.
     owner: artifact-comments
     source: {file: artifact-comments-spec.md, anchor: html-preview-text-selection}
     acceptance:
-      behavior: {id: CMT-024-B, description: "In Annotate and in Interact mode, drag across artifact text: Copy and Comment appear, the copy shortcut and the Copy control each put the selected text on the clipboard, Comment opens the composer quoting the selection, and typing a character opens it with that character so the saved thread carries the typed body and the selected text. In the dark and the light Review theme, every control on the offer reaches a contrast of at least 3:1 against it."}
-      failure: {id: CMT-024-F, description: "A selection never opens the composer or moves focus out of the artifact by itself, copying and Escape create no comment, a second selection after a copy is offered again, and a plain click on an element in Annotate mode still opens the composer directly."}
+      behavior: {id: CMT-024-B, description: "In Annotate and in Interact mode, drag across artifact text: Copy and Comment appear, the copy shortcut and the Copy control each put the selected text on the clipboard, Comment opens the composer quoting the selection, typing a character opens it with that character so the saved thread carries the typed body and the selected text, and Looks good saves a thread on the selection without opening the composer. In the dark and the light Review theme, every control on the offer reaches a contrast of at least 3:1 against it."}
+      failure: {id: CMT-024-F, description: "A selection never opens the composer or moves focus out of the artifact by itself, copying and Escape create no comment, a second selection after a copy is offered again, and a plain click on an element that is not a link in Annotate mode still opens the composer directly."}
     deployments: *all
     status: implementing
     proof_gap: CMT-024-B and CMT-024-F drive the production Review build in local headless Chromium with clipboard permission granted, so the native copy shortcut is proved there only. Copy through the browser context menu, and Firefox and WebKit, are not recorded. No deployment-specific evidence is recorded.

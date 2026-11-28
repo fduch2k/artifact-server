@@ -231,6 +231,9 @@ export function ReviewFrame(): React.ReactNode {
           rawHtml={session.html}
           readOnly={session.readOnly}
           ref={viewerRef}
+          // CMT-014: scripts only. 0.67 defaults to adding `allow-modals`,
+          // which would let the artifact draw dialogs over Review.
+          sandbox="allow-scripts"
           selectedAnnotationId={selectedThreadId}
           title={`Artifact review: ${session.entryPath}`}
         />
