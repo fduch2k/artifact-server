@@ -10,6 +10,9 @@ export const reviewProtocolVersion = 1;
 
 const versionSchema = z.literal(reviewProtocolVersion);
 
+/** Bounded like the bridge's own page reports. */
+const pageUrlSchema = z.string().min(1).max(2_048).startsWith("/");
+
 const anchorPointSchema = z.object({
   x: z.number().min(0).max(1),
   y: z.number().min(0).max(1),
@@ -44,9 +47,23 @@ export const reviewAnchorSchema = z.object({
   htmlAdditionalTargets: z.array(htmlAnnotationTargetSchema).max(16).optional(),
   htmlAnchor: htmlElementAnchorSchema.nullable(),
   originalText: z.string().max(10_000),
+  // The page of a routed or multi-page version (pathname + search on its
+  // preview origin) the comment was made on. Absent on comments made before
+  // Review ran versions live, which therefore show on every page (ADR 0045).
+  pageUrl: pageUrlSchema.optional(),
 });
 
 const optionalAnchorSchema = reviewAnchorSchema.nullable().catch(null);
+
+/**
+ * Where the review frame points its live viewer: the entry document on the
+ * version's preview lease origin, and the session the injected bridge uses.
+ */
+const liveSourceFields = {
+  liveOrigin: z.string().max(2_048),
+  liveToken: z.string().min(1).max(256),
+  src: z.string().max(4_096),
+};
 
 /** One comment thread as the host projects it into the page. */
 export const reviewAnnotationSchema = z.object({
@@ -66,14 +83,20 @@ export const hostMessageSchema = z.discriminatedUnion("type", [
   z.object({
     annotateModeActive: z.boolean().optional(),
     annotations: z.array(reviewAnnotationSchema),
-    baseHref: z.string().nullable(),
     entryPath: z.string(),
-    html: z.string(),
     isLight: z.boolean(),
     readOnly: z.boolean(),
     themeTokens: themeTokensSchema,
     type: z.literal("as-review-init"),
     v: versionSchema,
+    ...liveSourceFields,
+  }),
+  // A new lease replaced one that expired while the view was open: same
+  // version, new origin, reopened at the page the reviewer was on.
+  z.object({
+    type: z.literal("as-review-source"),
+    v: versionSchema,
+    ...liveSourceFields,
   }),
   z.object({
     annotations: z.array(reviewAnnotationSchema),
@@ -103,6 +126,7 @@ export type ReviewAnnotation = z.infer<typeof reviewAnnotationSchema>;
 export type ReviewAnchor = z.infer<typeof reviewAnchorSchema>;
 export type ReviewInit = Extract<HostMessage, {type: "as-review-init"}>;
 export type ReviewTheme = Extract<HostMessage, {type: "as-review-theme"}>;
+export type ReviewSource = Extract<HostMessage, {type: "as-review-source"}>;
 
 /** Every message the review frame sends back to the host. */
 export const frameMessageSchema = z.discriminatedUnion("type", [
@@ -138,6 +162,13 @@ export const frameMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("as-review-unanchored"),
     v: versionSchema,
   }),
+  // The page the artifact is showing, as its bridge reported it. The host
+  // keeps it to reopen the same page on a new lease.
+  z.object({
+    pageUrl: pageUrlSchema,
+    type: z.literal("as-review-page"),
+    v: versionSchema,
+  }),
 ]);
 
 export type FrameMessage = z.infer<typeof frameMessageSchema>;
@@ -147,13 +178,17 @@ export function reviewAnchorFrom(
   originalText: string,
   htmlAnchor: HtmlElementAnchor | undefined,
   htmlAdditionalTargets: HtmlAnnotationTarget[] | undefined,
+  pageUrl: string | undefined,
 ): ReviewAnchor {
   const anchor: ReviewAnchor = {
     htmlAnchor: htmlAnchor ?? null,
     originalText,
   };
   if (htmlAdditionalTargets !== undefined && htmlAdditionalTargets.length > 0) {
-    return {...anchor, htmlAdditionalTargets};
+    anchor.htmlAdditionalTargets = htmlAdditionalTargets;
+  }
+  if (pageUrl !== undefined && pageUrlSchema.safeParse(pageUrl).success) {
+    anchor.pageUrl = pageUrl;
   }
   return anchor;
 }

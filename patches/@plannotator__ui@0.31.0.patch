@@ -1,0 +1,51 @@
+diff --git a/components/html-viewer/HtmlViewer.tsx b/components/html-viewer/HtmlViewer.tsx
+index 337065dc0d49079e806fd9e09abadf8aec4bd36e..237df3c7d87d3553eb6b28d8a629853311683ac0 100644
+--- a/components/html-viewer/HtmlViewer.tsx
++++ b/components/html-viewer/HtmlViewer.tsx
+@@ -148,6 +148,8 @@ export interface HtmlViewerProps {
+   /** Live session credentials paired with `src`: proxy origin + per-session
+    *  token, validated on every inbound message and stamped on every post. */
+   liveSession?: HtmlLiveSession;
++  /** Sandbox tokens for the live iframe. Omitted, live mode keeps no sandbox. */
++  liveSandbox?: string;
+   /** Current page (pathname + search) in a live multi-page session. Restore
+    *  filters annotations to this page; changing it re-applies the filter. */
+   currentPageUrl?: string;
+@@ -218,6 +220,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
+       rawHtml,
+       src,
+       liveSession,
++      liveSandbox,
+       currentPageUrl,
+       onPageChange,
+       annotations,
+@@ -820,7 +823,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
+                 same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
+             <iframe
+               ref={iframeRef}
+-              {...(src ? { src } : { srcDoc: srcdoc, sandbox: "allow-scripts" })}
++              {...(src ? { src, ...(liveSandbox !== undefined ? { sandbox: liveSandbox } : {}) } : { srcDoc: srcdoc, sandbox: "allow-scripts" })}
+               style={{
+                 width: "100%",
+                 height: fullViewport ? "100%" : `${iframeHeight}px`,
+diff --git a/components/html-viewer/bridge-script.ts b/components/html-viewer/bridge-script.ts
+index 939c91888ae5d5ce64d996acc58fc497da36b599..2922022593bb4ae354d0ec00161d1cfd79b9d111 100644
+--- a/components/html-viewer/bridge-script.ts
++++ b/components/html-viewer/bridge-script.ts
+@@ -221,7 +221,15 @@ export const BRIDGE_SCRIPT = `(function() {
+   // nested same-origin subframes: only the frame whose parent IS the editor
+   // may run.
+   var LIVE = window.__plannotatorLiveConfig || null;
+-  if (LIVE && (window === window.parent || window.parent !== window.top)) return;
++  // Hosts that frame the editor themselves (an application shell around a
++  // separate review document) set frameDepth to the editor's own depth + 1.
++  function frameDepth() {
++    var depth = 0;
++    var current = window;
++    while (current !== current.parent && depth < 16) { current = current.parent; depth++; }
++    return depth;
++  }
++  if (LIVE && (window === window.parent || frameDepth() !== (LIVE.frameDepth || 1))) return;
+   // The server cannot know which origin form (localhost or 127.0.0.1) the
+   // editor tab was opened on, so live outbound messages are posted once per
+   // listed editor origin: the browser delivers only the post whose

@@ -4,6 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 
 import {
   api,
+  ApiError,
   type ArtifactVersion,
 } from "@/api/client";
 import {formatBytes} from "@/lib/presentation";
@@ -22,10 +23,21 @@ import {
  */
 const stalledEntryTimeoutMs = 15_000;
 
+/**
+ * A preview lease lives 15 minutes. Review renews it well inside that while
+ * the view is open, so the version keeps its origin, and the storage it made
+ * there, for as long as someone is reviewing it (ADR 0045).
+ */
+const leaseRenewalIntervalMs = 5 * 60_000;
+
+/** The version's entry document on its preview lease origin. */
 interface PreviewDocument {
-  readonly baseHref: string;
+  /** The lease's base URL, which also names the lease when renewing it. */
+  readonly baseUrl: string;
   readonly entryPath: string;
-  readonly html: string;
+  readonly liveOrigin: string;
+  readonly liveToken: string;
+  readonly src: string;
 }
 
 interface PreviewEntry {
@@ -237,6 +249,7 @@ function HtmlPreview({
   const [error, setError] = useState<Error | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const initialisedRef = useRef(false);
+  const pageUrlRef = useRef<string | null>(null);
 
   const postToFrame = useCallback((message: HostMessage): void => {
     const frame = frameRef.current?.contentWindow;
@@ -244,33 +257,30 @@ function HtmlPreview({
     frame.postMessage(message, window.location.origin);
   }, []);
 
+  const issueDocument = useCallback(async (): Promise<PreviewDocument> => {
+    const lease = await api.previewLease(projectId, artifactId, version.version.id);
+    if (lease.versionId !== version.version.id) {
+      throw new Error("The preview lease resolved a different version.");
+    }
+    return {
+      baseUrl: lease.baseUrl,
+      entryPath: entry.path,
+      liveOrigin: new URL(lease.baseUrl).origin,
+      liveToken: lease.bridgeToken,
+      src: entryDocumentUrl(
+        lease.baseUrl,
+        entry.path,
+        version.manifest.entryPath,
+      ),
+    };
+  }, [artifactId, entry.path, projectId, version.manifest.entryPath, version.version.id]);
+
   useEffect(() => {
     let current = true;
     void (async () => {
       try {
-        const [html, resolvedBase] = await Promise.all([
-          api.versionFile(
-            projectId,
-            artifactId,
-            version.version.id,
-            entry.path,
-          ),
-          api.previewLease(projectId, artifactId, version.version.id).then(
-            (lease) => {
-              if (lease.versionId !== version.version.id) {
-                throw new Error("The preview lease resolved a different version.");
-              }
-              return lease.baseUrl;
-            },
-          ),
-        ]);
-        if (current) {
-          setPreviewDocument({
-            baseHref: documentBaseUrl(resolvedBase, entry.path),
-            entryPath: entry.path,
-            html,
-          });
-        }
+        const issued = await issueDocument();
+        if (current) setPreviewDocument(issued);
       } catch (cause) {
         if (!current) return;
         setError(
@@ -283,7 +293,44 @@ function HtmlPreview({
     return () => {
       current = false;
     };
-  }, [artifactId, entry.path, projectId, version.version.id]);
+  }, [issueDocument]);
+
+  // Keep the lease alive while this view is open. A lease that already
+  // expired (a laptop that slept) cannot be renewed; a new one has a new
+  // origin, so the frame reopens on it at the page the reviewer was on.
+  const baseUrl = previewDocument?.baseUrl ?? null;
+  useEffect(() => {
+    if (baseUrl === null) return undefined;
+    let current = true;
+    const renew = async (): Promise<void> => {
+      try {
+        await api.renewPreviewLease(projectId, artifactId, version.version.id, baseUrl);
+      } catch (cause) {
+        if (!(cause instanceof ApiError) || cause.code !== "PREVIEW_LEASE_EXPIRED") return;
+        const issued = await issueDocument();
+        if (!current) return;
+        const pageUrl = pageUrlRef.current;
+        const reopened = pageUrl === null
+          ? issued
+          : {...issued, src: new URL(pageUrl, issued.liveOrigin).toString()};
+        setPreviewDocument(reopened);
+        postToFrame({
+          liveOrigin: reopened.liveOrigin,
+          liveToken: reopened.liveToken,
+          src: reopened.src,
+          type: "as-review-source",
+          v: reviewProtocolVersion,
+        });
+      }
+    };
+    const timer = window.setInterval(() => {
+      void renew().catch(() => undefined);
+    }, leaseRenewalIntervalMs);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+    };
+  }, [artifactId, baseUrl, issueDocument, postToFrame, projectId, version.version.id]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>): void => {
@@ -310,6 +357,10 @@ function HtmlPreview({
       }
       if (message.type === "as-review-annotate-mode-request") {
         onAnnotateModeChange(message.active);
+        return;
+      }
+      if (message.type === "as-review-page") {
+        pageUrlRef.current = message.pageUrl;
         return;
       }
       void (async () => {
@@ -341,11 +392,12 @@ function HtmlPreview({
     postToFrame({
       annotateModeActive,
       annotations: [...annotations],
-      baseHref: previewDocument.baseHref,
       entryPath: previewDocument.entryPath,
-      html: previewDocument.html,
       isLight,
+      liveOrigin: previewDocument.liveOrigin,
+      liveToken: previewDocument.liveToken,
       readOnly,
+      src: previewDocument.src,
       themeTokens: reviewThemeTokens(),
       type: "as-review-init",
       v: reviewProtocolVersion,
@@ -461,8 +513,8 @@ function StalledEntryNotice({
         <strong>This page has not finished loading</strong>
         <p>
           <code>{path}</code> is still loading after {stalledEntryTimeoutMs / 1_000} seconds.
-          Review runs pages in a sandbox without storage, workers, or embedded
-          frames, so a page that needs them may never finish here.
+          A page that waits on something that never arrives, such as a slow
+          image or an unreachable server, may never finish here or on its own.
         </p>
       </div>
       <div className="as-preview-stalled__actions">
@@ -483,12 +535,23 @@ function StalledEntryNotice({
   );
 }
 
-function documentBaseUrl(versionBaseUrl: string, entryPath: string): string {
-  const entryUrl = new URL(
-    entryPath.split("/").map(encodeURIComponent).join("/"),
+/**
+ * The URL Review opens on the lease origin. A top-level entry document opens
+ * at `/`, as the version's raw link does, so a client-side router sees the
+ * path it was built for; any other file opens at its own path.
+ */
+function entryDocumentUrl(
+  versionBaseUrl: string,
+  path: string,
+  versionEntryPath: string,
+): string {
+  if (path === versionEntryPath && !path.includes("/")) {
+    return new URL("/", versionBaseUrl).toString();
+  }
+  return new URL(
+    path.split("/").map(encodeURIComponent).join("/"),
     versionBaseUrl,
-  );
-  return new URL(".", entryUrl).toString();
+  ).toString();
 }
 
 function NativeMediaPreview({

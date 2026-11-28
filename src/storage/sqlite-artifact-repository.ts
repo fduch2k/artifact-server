@@ -2474,6 +2474,21 @@ export class SqliteArtifactRepository implements
     });
   }
 
+  extendPreviewLease(
+    tokenDigest: string,
+    requestTime: string,
+    expiresAt: string,
+  ): Promise<boolean> {
+    return Promise.resolve().then(() => {
+      const result = this.#database.prepare(
+        `UPDATE content_sessions
+        SET expires_at = MAX(expires_at, ?)
+        WHERE token_digest = ? AND expires_at > ?`,
+      ).run(expiresAt, tokenDigest, requestTime);
+      return Number(result.changes) > 0;
+    });
+  }
+
   createStagedUpload(command: CreateStagedUpload): Promise<StagedUpload> {
     return Promise.resolve().then(() =>
       this.#transaction(() => {

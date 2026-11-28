@@ -732,6 +732,15 @@ export function createApplicationLayer(
             ),
           catch: (cause) => repositoryFailure("findContentSession", cause),
         }),
+      extendPreviewLease: (tokenDigest, requestTime, expiresAt) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.extendPreviewLease(
+            tokenDigest,
+            requestTime,
+            expiresAt,
+          ),
+          catch: (cause) => repositoryFailure("extendPreviewLease", cause),
+        }),
       findPreviewLease: (tokenDigest, requestTime) =>
         Effect.tryPromise({
           try: () => adapters.repository.findPreviewLease(tokenDigest, requestTime),

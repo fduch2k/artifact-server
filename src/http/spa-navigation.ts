@@ -7,6 +7,18 @@ export function permitsSpaEntryFallback(headers: Headers): boolean {
 }
 
 /**
+ * The preview host serves Review, which opens the version inside a frame
+ * (ADR 0045), so a frame navigation to a missing path of a SPA version gets
+ * the entry exactly as a top-level navigation on the raw link does.
+ */
+export function permitsFramedSpaEntryFallback(headers: Headers): boolean {
+  if (permitsSpaEntryFallback(headers)) return true;
+  if (!acceptsHtml(headers.get("accept"))) return false;
+  return headers.get("sec-fetch-dest")?.toLowerCase() === "iframe"
+    && headers.get("sec-fetch-mode")?.toLowerCase() === "navigate";
+}
+
+/**
  * Decide whether a request is a person's browser opening a page, as opposed
  * to a script, an asset, or a program that reads the response itself.
  */

@@ -1,11 +1,11 @@
 import {
   HtmlViewer,
   type Annotation,
+  type HtmlLiveSession,
   type ViewerHandle,
 } from "@plannotator/ui/components/html-viewer";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { withBaseHref } from "./base-href.ts";
 import {
   hostMessageSchema,
   reviewAnchorFrom,
@@ -13,16 +13,60 @@ import {
   type FrameMessage,
   type ReviewAnnotation,
   type ReviewInit,
+  type ReviewSource,
   type ReviewTheme,
 } from "./protocol.ts";
+
+/**
+ * The artifact runs on its own preview lease origin (ADR 0045). Same-origin
+ * gives it storage, routing, and workers there; the remaining sandbox keeps it
+ * from navigating the top window, opening windows, submitting forms, showing
+ * modal dialogs, or downloading, as before. Because that origin is never this
+ * frame's, the document cannot lift its own sandbox.
+ */
+const artifactSandbox = "allow-scripts allow-same-origin";
+
+/** Where the live viewer points, already checked against its session. */
+interface LiveSource {
+  readonly live: HtmlLiveSession;
+  /** Bumped to reload the viewer even when the URL repeats. */
+  readonly navigation: number;
+  readonly src: string;
+}
 
 interface ReviewSession {
   readonly annotateModeActive: boolean;
   readonly annotations: Annotation[];
   readonly entryPath: string;
-  readonly html: string;
   readonly readOnly: boolean;
+  /** Null when the host named a source this frame refuses to load. */
+  readonly source: LiveSource | null;
   readonly supportsAnnotateMode: boolean;
+}
+
+/**
+ * Accept only an http(s) URL on exactly the live origin, and never this
+ * frame's own origin: a same-origin artifact with scripts could remove its
+ * own sandbox and reach the application.
+ */
+function liveSourceFrom(
+  message: ReviewInit | ReviewSource,
+  navigation: number,
+): LiveSource | null {
+  let url: URL;
+  try {
+    url = new URL(message.src);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.origin !== message.liveOrigin) return null;
+  if (url.origin === window.location.origin) return null;
+  return {
+    live: {origin: url.origin, token: message.liveToken},
+    navigation,
+    src: url.toString(),
+  };
 }
 
 /** Project one host thread into the record the viewer paints and numbers. */
@@ -39,6 +83,7 @@ function toAnnotation(review: ReviewAnnotation): Annotation {
   };
   const anchor = review.anchor;
   if (anchor === null) return annotation;
+  if (anchor.pageUrl !== undefined) annotation.pageUrl = anchor.pageUrl;
   if (anchor.htmlAnchor !== null) annotation.htmlAnchor = anchor.htmlAnchor;
   if (anchor.htmlAdditionalTargets !== undefined) {
     annotation.htmlAdditionalTargets = anchor.htmlAdditionalTargets;
@@ -51,9 +96,23 @@ function sessionFrom(init: ReviewInit): ReviewSession {
     annotateModeActive: init.annotateModeActive ?? true,
     annotations: init.annotations.map(toAnnotation),
     entryPath: init.entryPath,
-    html: withBaseHref(init.html, init.baseHref),
     readOnly: init.readOnly,
+    source: liveSourceFrom(init, 0),
     supportsAnnotateMode: init.annotateModeActive !== undefined,
+  };
+}
+
+/** Point the viewer at another page of the same live origin. */
+function withPage(session: ReviewSession, pageUrl: string): ReviewSession {
+  const source = session.source;
+  if (source === null) return session;
+  return {
+    ...session,
+    source: {
+      ...source,
+      navigation: source.navigation + 1,
+      src: new URL(pageUrl, source.live.origin).toString(),
+    },
   };
 }
 
@@ -68,13 +127,16 @@ function applyTheme(theme: ReviewInit | ReviewTheme): void {
 
 /**
  * The review frame: a same-origin document whose only job is to host
- * `@plannotator/ui`'s sandboxed HTML annotation surface and relay its events
- * to the application shell. It holds no credential, makes no request, and
- * learns everything it renders from one validated `as-review-init` message.
+ * `@plannotator/ui`'s live HTML annotation surface over the version's preview
+ * origin and relay its events to the application shell. It holds no
+ * credential, makes no request, and learns everything it renders from one
+ * validated `as-review-init` message.
  */
 export function ReviewFrame(): React.ReactNode {
   const [session, setSession] = useState<ReviewSession | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [currentPageUrl, setCurrentPageUrl] = useState<string | undefined>(undefined);
+  const currentPageUrlRef = useRef<string | undefined>(undefined);
   const viewerRef = useRef<ViewerHandle | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const paintedIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
@@ -120,6 +182,14 @@ export function ReviewFrame(): React.ReactNode {
         applyTheme(message);
         return;
       }
+      if (message.type === "as-review-source") {
+        setSession((current) => {
+          if (current === null) return current;
+          const navigation = (current.source?.navigation ?? 0) + 1;
+          return {...current, source: liveSourceFrom(message, navigation)};
+        });
+        return;
+      }
       if (message.type === "as-review-annotations") {
         const annotations = message.annotations.map(toAnnotation);
         setSession((current) =>
@@ -135,7 +205,20 @@ export function ReviewFrame(): React.ReactNode {
         );
         return;
       }
-      setSelectedThreadId(message.threadId);
+      // Show in page for a comment made on another page of a routed or
+      // multi-page version opens that page first.
+      const threadId = message.threadId;
+      setSession((current) => {
+        if (current === null || threadId === null) return current;
+        const pageUrl = current.annotations.find(
+          (annotation) => annotation.id === threadId,
+        )?.pageUrl;
+        if (pageUrl === undefined || pageUrl === currentPageUrlRef.current) {
+          return current;
+        }
+        return withPage(current, pageUrl);
+      });
+      setSelectedThreadId(threadId);
     };
     if (framed) {
       window.addEventListener("message", onMessage);
@@ -165,7 +248,17 @@ export function ReviewFrame(): React.ReactNode {
     paintedIdsRef.current = next;
   }, [annotations]);
 
-  const handleAdd = useCallback((annotation: Annotation): void => {
+  const handlePageChange = useCallback((pageUrl: string): void => {
+    currentPageUrlRef.current = pageUrl;
+    setCurrentPageUrl(pageUrl);
+    send({pageUrl, type: "as-review-page", v: reviewProtocolVersion});
+  }, [send]);
+
+  const handleAdd = useCallback((created: Annotation): void => {
+    const pageUrl = currentPageUrlRef.current;
+    const annotation: Annotation = pageUrl === undefined
+      ? created
+      : {...created, pageUrl};
     setSession((current) =>
       current === null
         ? current
@@ -176,6 +269,7 @@ export function ReviewFrame(): React.ReactNode {
         annotation.originalText,
         annotation.htmlAnchor,
         annotation.htmlAdditionalTargets,
+        pageUrl,
       ),
       body: annotation.text ?? "",
       originalText: annotation.originalText,
@@ -207,10 +301,15 @@ export function ReviewFrame(): React.ReactNode {
         <p className="p-4 text-sm text-muted-foreground" role="status">
           Waiting for the artifact to load.
         </p>
+      ) : session.source === null ? (
+        <p className="p-4 text-sm text-muted-foreground" role="alert">
+          Review could not open this version&apos;s preview.
+        </p>
       ) : (
         <HtmlViewer
           annotateModeActive={session.annotateModeActive}
           annotations={session.annotations}
+          currentPageUrl={currentPageUrl}
           fullViewport
           hideControls
           inputMethod="pinpoint"
@@ -228,10 +327,15 @@ export function ReviewFrame(): React.ReactNode {
             : undefined}
           onSelectAnnotation={handleSelect}
           onUnanchoredChange={handleUnanchored}
-          rawHtml={session.html}
+          key={session.source.navigation}
+          liveSandbox={artifactSandbox}
+          liveSession={session.source.live}
+          onPageChange={handlePageChange}
+          rawHtml=""
           readOnly={session.readOnly}
           ref={viewerRef}
           selectedAnnotationId={selectedThreadId}
+          src={session.source.src}
           title={`Artifact review: ${session.entryPath}`}
         />
       )}

@@ -27,6 +27,7 @@ export const errorCodes = {
   linkPathOutsideRoots: "LINK_PATH_OUTSIDE_ROOTS",
   linkPathProtected: "LINK_PATH_PROTECTED",
   methodNotAllowed: "METHOD_NOT_ALLOWED",
+  previewLeaseExpired: "PREVIEW_LEASE_EXPIRED",
   mediaPreviewContextRequired: "MEDIA_PREVIEW_CONTEXT_REQUIRED",
   mediaPreviewTypeUnsupported: "MEDIA_PREVIEW_TYPE_UNSUPPORTED",
   capabilityUnavailable: "CAPABILITY_UNAVAILABLE",
@@ -162,6 +163,12 @@ export class ContentBootstrapRejected extends Schema.TaggedError<ContentBootstra
 /** A private version request lacks its exact version-scoped browser session. */
 export class ContentSessionRequired extends Schema.TaggedError<ContentSessionRequired>()(
   "ContentSessionRequired",
+  messageField,
+) {}
+
+/** A Review preview lease can no longer be renewed; Review must issue a new one. */
+export class PreviewLeaseExpired extends Schema.TaggedError<PreviewLeaseExpired>()(
+  "PreviewLeaseExpired",
   messageField,
 ) {}
 
@@ -389,6 +396,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "findIdempotentCommentThread",
       "findIdempotentPublication",
       "findPreviewLease",
+      "extendPreviewLease",
       "findStagedUpload",
       "findVersionContent",
       "deleteArtifact",
@@ -496,6 +504,7 @@ const artifactServerFailureSchema = Schema.Union([
   AuthorizationDenied,
   ContentBootstrapRejected,
   ContentSessionRequired,
+  PreviewLeaseExpired,
   InvalidArtifactName,
   InvalidProjectName,
   InvalidArtifactTags,

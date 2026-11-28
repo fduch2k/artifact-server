@@ -141,7 +141,20 @@ import {
   browserFailurePages,
   prefersBrowserFailurePage,
 } from "./browser-failure-page.js";
-import {isDocumentNavigation, permitsSpaEntryFallback} from "./spa-navigation.js";
+import {
+  isDocumentNavigation,
+  permitsFramedSpaEntryFallback,
+  permitsSpaEntryFallback,
+} from "./spa-navigation.js";
+import {
+  decodeHtml,
+  injectReviewBridge,
+  isHtmlMediaType,
+  maximumBridgedHtmlBytes,
+  type ReviewBridgeSource,
+  reviewBridgeSourceSchema,
+  reviewEditorOrigins,
+} from "./review-bridge-injection.js";
 import {
   maximumCommentPageSize,
   maximumDeclaredFiles,
@@ -2548,9 +2561,39 @@ export function createHttpApp(
           dependencies.contentDomain,
           Redacted.value(issued.token),
         ),
+        bridgeToken: issued.bridgeToken,
         expiresAt: issued.expiresAt,
         versionId: issued.versionId,
       }, 201);
+    },
+  );
+
+  // Review keeps its lease, and so its origin and the artifact's storage on
+  // it, while the view stays open (ADR 0045). The lease is named by the base
+  // URL the issuing call returned; only its content-host label is read.
+  app.post(
+    "/api/v1/artifacts/:artifactId/versions/:versionId/preview-leases/renewals",
+    boundedJsonBody,
+    async (context) => {
+      const body = previewLeaseRenewalSchema.parse(await context.req.json());
+      const leaseToken = previewLeaseTokenFromBaseUrl(
+        body.baseUrl,
+        dependencies.contentDomain,
+      );
+      const renewed = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        ContentAccessService.use((contentAccess) =>
+          contentAccess.renewPreviewLease({
+            artifactId: context.req.param("artifactId"),
+            principal: context.get("principal"),
+            projectId: requestedProjectId(context),
+            token: Redacted.make(leaseToken, {label: "preview-lease-token"}),
+            versionId: context.req.param("versionId"),
+          })
+        ),
+      );
+      return context.json(renewed, 200);
     },
   );
 
@@ -4017,35 +4060,131 @@ async function servePreviewLeaseContent(
   }
   const requestedPath = manifestPathFromUrl(requestUrl.pathname);
   if (requestedPath === null) return previewLeaseNotFoundResponse();
-  const content = await runHttpApplicationEffect(
+  const token = Redacted.make(leaseToken, {label: "preview-lease-token"});
+  const authorized = await runHttpApplicationEffect(
     context,
     dependencies,
     ContentAccessService.use((contentAccess) =>
       contentAccess.authorizePreviewContent({
-        fallback: permitsSpaEntryFallback(context.req.raw.headers)
+        fallback: permitsFramedSpaEntryFallback(context.req.raw.headers)
           ? "entry"
           : "none",
         path: requestedPath,
-        token: Redacted.make(leaseToken, {label: "preview-lease-token"}),
-      })
+        token,
+      }).pipe(Effect.map((content) => ({
+        bridgeToken: contentAccess.previewBridgeToken(token),
+        content,
+      })))
     ),
   );
-  if (content === null) return previewLeaseNotFoundResponse();
-  return serveStoredVersionContent(context, content, false, true, dependencies);
+  if (authorized.content === null) return previewLeaseNotFoundResponse();
+  const bridged = await serveBridgedPreviewDocument(
+    context,
+    requestUrl,
+    authorized.content,
+    authorized.bridgeToken,
+    dependencies,
+  );
+  if (bridged !== null) return bridged;
+  return serveStoredVersionContent(
+    context,
+    authorized.content,
+    false,
+    true,
+    dependencies,
+  );
 }
 
 /**
- * Review renders a version from an opaque-origin sandbox, so every request it
- * makes to the preview host is cross-origin. Found files already carry
- * `Access-Control-Allow-Origin: *`; a missing one must too, or a page that
- * probes for an optional file sees a network error where the same page opened
- * directly sees 404. Only a holder of a valid lease reaches this answer, and
- * that holder can already read every file the version has, so letting it read
- * "not here" as well reveals nothing new.
+ * Serve one inline HTML document of a leased version with the live annotation
+ * bridge inserted (ADR 0045). Returns null when the document is served as
+ * stored instead: not inline HTML, too large, an undecodable encoding, or no
+ * web build to take the bridge from (which also means no Review to use it).
+ */
+async function serveBridgedPreviewDocument(
+  context: Context<HttpEnvironment>,
+  requestUrl: URL,
+  content: VersionContent,
+  bridgeToken: string,
+  dependencies: HttpAppDependencies,
+): Promise<Response | null> {
+  if (
+    !isHtmlMediaType(content.entry.mediaType)
+    || content.entry.disposition.trim().toLowerCase().startsWith("attachment")
+    || content.entry.size > maximumBridgedHtmlBytes
+  ) return null;
+  const source = await reviewBridgeSource(dependencies);
+  if (source === null) return null;
+  const blob = await dependencies.blobs.open(content.entry.sha256);
+  const bytes = new Uint8Array(await new Response(blob.body).arrayBuffer());
+  assertBlobSize(bytes.byteLength, content.entry.size, content.entry.sha256);
+  const html = decodeHtml(bytes, content.entry.mediaType);
+  if (html === null) return null;
+  const body = new TextEncoder().encode(injectReviewBridge(html, source, {
+    editorOrigins: reviewEditorOrigins(
+      contentHostApplicationUrl(requestUrl, dependencies),
+      dependencies.trustedApplicationOrigin !== null,
+    ),
+    token: bridgeToken,
+  }));
+  const headers = new Headers({
+    "Cache-Control": "private, no-store",
+    "Content-Disposition": content.entry.disposition,
+    "Content-Length": String(body.byteLength),
+    "Content-Type": "text/html; charset=utf-8",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex, nofollow",
+  });
+  return new Response(context.req.method === "HEAD" ? null : body, {
+    headers,
+    status: 200,
+  });
+}
+
+const reviewBridgeSources = new WeakMap<
+  WebAssetStore,
+  Promise<ReviewBridgeSource | null>
+>();
+
+/** The bridge copied from the web build, read once per asset store. */
+function reviewBridgeSource(
+  dependencies: HttpAppDependencies,
+): Promise<ReviewBridgeSource | null> {
+  const assets = dependencies.webAssets;
+  if (assets === undefined) return Promise.resolve(null);
+  const cached = reviewBridgeSources.get(assets);
+  if (cached !== undefined) return cached;
+  const loaded = (async () => {
+    const asset = await assets.fetch("/review-bridge.json", "GET");
+    if (asset === null || !asset.ok) return null;
+    const parsed = reviewBridgeSourceSchema.safeParse(await asset.json());
+    return parsed.success ? parsed.data : null;
+  })();
+  reviewBridgeSources.set(assets, loaded);
+  return loaded;
+}
+
+const previewLeaseRenewalSchema = z.object({baseUrl: z.url()}).strict();
+
+function previewLeaseTokenFromBaseUrl(
+  baseUrl: string,
+  contentDomain: string,
+): string {
+  const token = tokenFromContentHost(new URL(baseUrl).hostname, contentDomain);
+  // A malformed or foreign base URL is reported like an expired lease: the
+  // caller's only recovery in both cases is to request a new lease.
+  return token !== null && isPreviewLeaseToken(token) ? token : "review-invalid";
+}
+
+/**
+ * Review runs the version on the lease origin itself (ADR 0045), so its
+ * requests for its own files are same-origin and a missing one is a readable
+ * 404 without any CORS header. It is private and never cached, like every
+ * other lease response.
  */
 function previewLeaseNotFoundResponse(): Response {
   const response = versionNotFoundResponse();
-  response.headers.set("Access-Control-Allow-Origin", "*");
   response.headers.set("Cache-Control", "private, no-store");
   response.headers.set("Referrer-Policy", "no-referrer");
   return response;
@@ -4064,7 +4203,6 @@ async function serveStoredVersionContent(
     publiclyCacheable,
   );
   if (previewLease) {
-    headers.set("Access-Control-Allow-Origin", "*");
     headers.set("Cache-Control", "private, no-store");
     headers.set("Cross-Origin-Resource-Policy", "cross-origin");
     headers.set("Referrer-Policy", "no-referrer");
@@ -4638,10 +4776,10 @@ function isContentBootstrapRequest(requestUrl: URL): boolean {
 }
 
 /**
- * The review frame renders one artifact version inside an opaque-origin
- * `srcdoc` sandbox. Relative resources resolve through an exact-version content
- * host, so the inherited policy permits network access only to configured
- * content hosts. The frame still cannot reach the trusted application origin.
+ * The review frame hosts the annotation viewer and frames one artifact
+ * version on its preview lease host (ADR 0045). The artifact document is a
+ * navigation, so it runs under its own response headers, not this policy;
+ * `frame-src` admits only content hosts, never the application origin.
  */
 function reviewFrameContentSecurityPolicy(contentDomain: string): string {
   const httpContent = `http://*.${contentDomain}:*`;
@@ -4659,6 +4797,7 @@ function reviewFrameContentSecurityPolicy(contentDomain: string): string {
     "font-src * data:",
     "media-src * data: blob:",
     `connect-src ${contentSources}`,
+    `frame-src ${contentSources}`,
     "frame-ancestors 'self'",
   ].join("; ");
 }

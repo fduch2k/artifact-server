@@ -1208,11 +1208,22 @@ export const api = {
   ) => request(
     z.object({
       baseUrl: z.url(),
+      bridgeToken: z.string().min(1),
       expiresAt: z.string(),
       versionId: z.string(),
     }),
     `/api/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(versionId)}/preview-leases?${projectQuery(projectId)}`,
     {headers: mutationHeaders(), method: "POST"},
+  ),
+  renewPreviewLease: (
+    projectId: string,
+    artifactId: string,
+    versionId: string,
+    baseUrl: string,
+  ) => request(
+    z.object({expiresAt: z.string(), versionId: z.string()}),
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(versionId)}/preview-leases/renewals?${projectQuery(projectId)}`,
+    {body: JSON.stringify({baseUrl}), headers: mutationHeaders(), method: "POST"},
   ),
   versionFile: (
     projectId: string,

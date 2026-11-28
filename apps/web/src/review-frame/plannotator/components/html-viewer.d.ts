@@ -8,7 +8,7 @@
  * `apps/web/tsconfig.json` maps `@plannotator/ui/*` here so the compiler sees
  * this declared contract instead; Vite still bundles the real source.
  *
- * Mirrors @plannotator/ui@0.31.0:
+ * Mirrors @plannotator/ui@0.31.0 with patches/@plannotator__ui@0.31.0.patch:
  *   components/html-viewer/HtmlViewer.tsx:137-181 (HtmlViewerProps)
  *   components/Viewer.tsx:141-145 (ViewerHandle)
  *   types.ts:1-5, 60-125 (AnnotationType, Annotation, anchors)
@@ -49,6 +49,14 @@ export interface Annotation {
   author?: string | undefined;
   htmlAnchor?: HtmlElementAnchor | undefined;
   htmlAdditionalTargets?: HtmlAnnotationTarget[] | undefined;
+  /** Live sessions only: the page (pathname + search) the annotation is on. */
+  pageUrl?: string | undefined;
+}
+
+/** Live-mode session: the origin bridge messages must come from, and its token. */
+export interface HtmlLiveSession {
+  origin: string;
+  token: string;
 }
 
 /** Imperative repaint handle for a prop-driven mount. */
@@ -61,6 +69,13 @@ export interface ViewerHandle {
 /** Inputs for the sandboxed raw-HTML viewer and its parent-side annotation UI. */
 export interface HtmlViewerProps {
   rawHtml: string;
+  /** Live mode: navigate the iframe to this URL instead of building a srcdoc. */
+  src?: string | undefined;
+  liveSession?: HtmlLiveSession | undefined;
+  /** Sandbox tokens for the live iframe (local patch, ADR 0045). */
+  liveSandbox?: string | undefined;
+  currentPageUrl?: string | undefined;
+  onPageChange?: ((pageUrl: string) => void) | undefined;
   annotations: Annotation[];
   onAddAnnotation: (annotation: Annotation) => void;
   onSelectAnnotation: (id: string | null) => void;

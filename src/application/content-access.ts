@@ -13,6 +13,7 @@ import {
   type AuthorizationDenied,
   ContentBootstrapRejected,
   ContentSessionRequired,
+  PreviewLeaseExpired,
   VersionNotFound,
 } from "../core/errors.js";
 import type { Principal } from "../core/identity.js";
@@ -81,6 +82,11 @@ export interface ContentAccessRepository {
     tokenDigest: string,
     requestTime: string,
   ) => Effect.Effect<ContentSessionRecord | null, ArtifactRepositoryFailure>;
+  readonly extendPreviewLease: (
+    tokenDigest: string,
+    requestTime: string,
+    expiresAt: string,
+  ) => Effect.Effect<boolean, ArtifactRepositoryFailure>;
   readonly findCurrentVersion: (
     projectId: string | null,
     artifactId: string,
@@ -123,6 +129,8 @@ export interface IssuedContentSession {
 
 /** One short-lived content-host lease for embedded exact-version Review. */
 export interface IssuedPreviewLease {
+  /** Token the injected annotation bridge and the review frame exchange. */
+  readonly bridgeToken: string;
   readonly expiresAt: string;
   readonly token: Redacted.Redacted;
   readonly versionId: string;
@@ -172,6 +180,21 @@ export interface IssuePreviewLeaseCommand {
   readonly versionId: string;
 }
 
+/** Input for keeping one Review lease alive while its view stays open. */
+export interface RenewPreviewLeaseCommand {
+  readonly artifactId: string;
+  readonly principal: Principal;
+  readonly projectId: string | null;
+  readonly token: Redacted.Redacted;
+  readonly versionId: string;
+}
+
+/** A renewed Review lease. */
+export interface RenewedPreviewLease {
+  readonly expiresAt: string;
+  readonly versionId: string;
+}
+
 /** Input for authorizing one manifest path through a Review lease hostname. */
 export interface AuthorizePreviewContentCommand {
   readonly fallback: VersionContentFallback;
@@ -185,6 +208,7 @@ export type ContentAccessFailure =
   | AuthorizationDenied
   | ContentBootstrapRejected
   | ContentSessionRequired
+  | PreviewLeaseExpired
   | VersionNotFound
   | ArtifactRepositoryFailure
   | ProjectManagementFailure;
@@ -208,6 +232,15 @@ interface ContentAccessOperations {
   readonly issuePreviewLease: (
     command: IssuePreviewLeaseCommand,
   ) => Effect.Effect<IssuedPreviewLease, ContentAccessFailure>;
+  /**
+   * The annotation-bridge token for one lease. It is derived, not stored: the
+   * bridge runs in the artifact's own realm, so the token binds messages to
+   * the lease origin and view but is not a secret from the artifact (ADR 0045).
+   */
+  readonly previewBridgeToken: (token: Redacted.Redacted) => string;
+  readonly renewPreviewLease: (
+    command: RenewPreviewLeaseCommand,
+  ) => Effect.Effect<RenewedPreviewLease, ContentAccessFailure>;
   readonly resolvePublicArtifact: (
     artifactId: string,
   ) => Effect.Effect<PublishedVersion, ContentAccessFailure>;
@@ -351,6 +384,12 @@ function makeContentAccessService(
     });
   });
 
+  const previewBridgeToken = (token: Redacted.Redacted): string =>
+    dependencies.secrets.digest(Redacted.make(
+      `review-bridge:${Redacted.value(token)}`,
+      {label: "preview-bridge-input"},
+    ));
+
   const issuePreviewLease = Effect.fn(
     "ContentAccessService.issuePreviewLease",
   )(function*(command: IssuePreviewLeaseCommand) {
@@ -383,7 +422,57 @@ function makeContentAccessService(
       tokenDigest: dependencies.secrets.digest(token),
       versionId: target.id,
     });
-    return {expiresAt, token, versionId: target.id};
+    return {
+      bridgeToken: previewBridgeToken(token),
+      expiresAt,
+      token,
+      versionId: target.id,
+    };
+  });
+
+  // Review renews its lease while the view stays open (ADR 0045). Every
+  // renewal re-checks that the signed-in principal may still read the version
+  // and that the lease is theirs for exactly this version, so a removed member
+  // or a closed view stops renewing and the lease ends within its lifetime.
+  const renewPreviewLease = Effect.fn(
+    "ContentAccessService.renewPreviewLease",
+  )(function*(command: RenewPreviewLeaseCommand) {
+    const {artifact, project, target} = yield* resolveAuthorizedTarget({
+      artifactId: command.artifactId,
+      principal: command.principal,
+      projectId: command.projectId,
+      target: {kind: "version", versionId: command.versionId},
+    });
+    const expired = new PreviewLeaseExpired({
+      message: "The preview lease has expired; request a new one.",
+    });
+    if (!isPreviewLeaseToken(Redacted.value(command.token))) {
+      return yield* Effect.fail(expired);
+    }
+    const now = yield* dependencies.clock.now;
+    const requestTime = DateTime.formatIso(now);
+    const tokenDigest = dependencies.secrets.digest(command.token);
+    const lease = yield* dependencies.repository.findPreviewLease(
+      tokenDigest,
+      requestTime,
+    );
+    if (
+      lease === null
+      || lease.principalId !== command.principal.id
+      || lease.projectId !== project.id
+      || lease.artifactId !== artifact.id
+      || lease.versionId !== target.id
+    ) return yield* Effect.fail(expired);
+    const expiresAt = DateTime.formatIso(
+      DateTime.addDuration(now, contentSessionLifetimeMilliseconds),
+    );
+    const extended = yield* dependencies.repository.extendPreviewLease(
+      tokenDigest,
+      requestTime,
+      expiresAt,
+    );
+    if (!extended) return yield* Effect.fail(expired);
+    return {expiresAt, versionId: target.id};
   });
 
   const exchangeContentBootstrap = Effect.fn(
@@ -484,6 +573,8 @@ function makeContentAccessService(
 
   return ContentAccessService.of({
     authorizePreviewContent,
+    previewBridgeToken,
+    renewPreviewLease,
     authorizeVersionContent,
     exchangeContentBootstrap,
     issueBrowserContentBootstrap,

@@ -760,6 +760,12 @@ export interface ContentSessionRepository {
     tokenDigest: string,
     requestTime: string,
   ): Promise<ContentSessionRecord | null>;
+  /** Move an unexpired lease's expiry; false when it had already expired. */
+  extendPreviewLease(
+    tokenDigest: string,
+    requestTime: string,
+    expiresAt: string,
+  ): Promise<boolean>;
 }
 
 export interface StagedUploadRepository {

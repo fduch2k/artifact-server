@@ -42,6 +42,8 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
       return {code: errorCodes.invalidComment, message: failure.message, status: 422};
     case "ContentBootstrapRejected":
       return {code: errorCodes.contentBootstrapRejected, message: failure.message, status: 401};
+    case "PreviewLeaseExpired":
+      return {code: errorCodes.previewLeaseExpired, message: failure.message, status: 410};
     case "ContentSessionRequired":
     case "ContentNotPublic":
       return {code: errorCodes.contentNotPublic, message: failure.message, status: 401};

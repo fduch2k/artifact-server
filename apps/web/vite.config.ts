@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin, type ProxyOptions } from "vite";
@@ -16,7 +18,7 @@ export default defineConfig({
       },
     },
   },
-  plugins: [react(), tailwindcss(), documentRoutes()],
+  plugins: [react(), tailwindcss(), documentRoutes(), reviewBridgeAsset()],
   resolve: {
     alias: {
       "@": new URL("./src", import.meta.url).pathname,
@@ -35,6 +37,51 @@ export default defineConfig({
     },
   },
 });
+
+/**
+ * The preview host injects Plannotator's live annotation bridge into the HTML
+ * it serves to Review (ADR 0045). The bridge text must be the exact pinned and
+ * patched version the review frame is built against, so the build copies it
+ * out of the dependency into `review-bridge.json`, which the server reads from
+ * the web assets. The module is plain string constants with no imports.
+ */
+function reviewBridgeAsset(): Plugin {
+  return {
+    apply: "build",
+    async generateBundle() {
+      const resolved = await this.resolve(
+        "@plannotator/ui/components/html-viewer/bridge-script",
+      );
+      if (resolved === null) {
+        this.error("Artifact Server could not resolve the Plannotator bridge script.");
+      }
+      const source = await readFile(resolved.id, "utf8");
+      const encoded = Buffer.from(source, "utf8").toString("base64");
+      const bridgeModule: unknown = await import(
+        /* @vite-ignore */ `data:text/javascript;base64,${encoded}`
+      );
+      const text = (name: string): string => {
+        const value: unknown = typeof bridgeModule === "object" && bridgeModule !== null
+          ? Reflect.get(bridgeModule, name)
+          : undefined;
+        if (typeof value !== "string" || value.length === 0) {
+          this.error(`The Plannotator bridge script no longer exports ${name}.`);
+        }
+        return value;
+      };
+      this.emitFile({
+        fileName: "review-bridge.json",
+        source: JSON.stringify({
+          bootstrap: text("LIVE_BRIDGE_BOOTSTRAP"),
+          bridge: text("BRIDGE_SCRIPT"),
+          css: text("ANNOTATION_HIGHLIGHT_CSS"),
+        }),
+        type: "asset",
+      });
+    },
+    name: "artifact-server-review-bridge",
+  };
+}
 
 /**
  * Production publishes extensionless routes for Artifact Server review and
