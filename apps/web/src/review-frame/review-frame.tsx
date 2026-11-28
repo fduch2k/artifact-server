@@ -145,6 +145,23 @@ export function ReviewFrame(): React.ReactNode {
     window.parent.postMessage(message, window.location.origin);
   }, []);
 
+  // A live document that opted into the host theme has its own receiver
+  // (injected by the preview host); the bridge only carries `--pn-*` tokens.
+  const themeRef = useRef<ReviewInit | ReviewTheme | null>(null);
+  const liveRef = useRef<{readonly origin: string; readonly token: string} | null>(null);
+  const sendHostTheme = useCallback((): void => {
+    const theme = themeRef.current;
+    const live = liveRef.current;
+    const artifact = surfaceRef.current?.querySelector("iframe")?.contentWindow;
+    if (theme === null || live === null || artifact === null || artifact === undefined) return;
+    artifact.postMessage({
+      isLight: theme.isLight,
+      token: live.token,
+      tokens: theme.themeTokens,
+      type: "as-review-host-theme",
+    }, live.origin);
+  }, []);
+
   // `load` does not bubble, but it does pass this ancestor in the capture
   // phase. Listening here, before the viewer commits its sandbox iframe,
   // sees the artifact document finish loading without running any code in
@@ -155,10 +172,11 @@ export function ReviewFrame(): React.ReactNode {
     const onLoad = (event: Event): void => {
       if (!(event.target instanceof HTMLIFrameElement)) return;
       send({type: "as-review-entry-loaded", v: reviewProtocolVersion});
+      sendHostTheme();
     };
     surface.addEventListener("load", onLoad, true);
     return () => surface.removeEventListener("load", onLoad, true);
-  }, [send]);
+  }, [send, sendHostTheme]);
 
   useEffect(() => {
     // Framed by the application shell or nothing: a top-level review frame has
@@ -172,6 +190,7 @@ export function ReviewFrame(): React.ReactNode {
       const message = parsed.data;
       if (message.type === "as-review-init") {
         applyTheme(message);
+        themeRef.current = message;
         paintedIdsRef.current = new Set(
           message.annotations.map((annotation) => annotation.threadId),
         );
@@ -180,6 +199,8 @@ export function ReviewFrame(): React.ReactNode {
       }
       if (message.type === "as-review-theme") {
         applyTheme(message);
+        themeRef.current = message;
+        sendHostTheme();
         return;
       }
       if (message.type === "as-review-source") {
@@ -227,7 +248,12 @@ export function ReviewFrame(): React.ReactNode {
     return () => {
       window.removeEventListener("message", onMessage);
     };
-  }, [send]);
+  }, [send, sendHostTheme]);
+
+  const live = session?.source?.live ?? null;
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
 
   // The viewer paints marks for its initial prop set when the bridge reports
   // ready; every later arrival or removal is reconciled by id so a replaced

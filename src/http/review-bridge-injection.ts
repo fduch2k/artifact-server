@@ -110,6 +110,7 @@ export function injectReviewBridge(
   const script = [
     "<script data-artifact-server-review-bridge>",
     `window.__plannotatorLiveConfig=${config};`,
+    hostThemeReceiver,
     source.bootstrap,
     ";",
     source.bridge,
@@ -130,6 +131,32 @@ export function injectReviewBridge(
   }
   return script + document;
 }
+
+/**
+ * Plannotator's live bridge writes only its own `--pn-*` tokens: it has no
+ * live host-theme opt-in. A document that opted in (CMT-023) gets Review's
+ * palette from this receiver instead, sent by the review frame, its parent,
+ * with this view's token. Artifact Server's own protocol, not the bridge's.
+ */
+const hostThemeReceiver = `(function () {
+  var config = window.__plannotatorLiveConfig;
+  if (!config || !config.hostTheme) return;
+  window.addEventListener("message", function (event) {
+    if (event.source !== window.parent) return;
+    if ((config.editorOrigins || []).indexOf(event.origin) < 0) return;
+    var data = event.data;
+    if (!data || data.type !== "as-review-host-theme" || data.token !== config.token) return;
+    var root = document.documentElement;
+    var tokens = data.tokens || {};
+    for (var key in tokens) {
+      if (!Object.prototype.hasOwnProperty.call(tokens, key)) continue;
+      if (key.indexOf("--") !== 0 || typeof tokens[key] !== "string") continue;
+      root.style.setProperty(key, tokens[key]);
+    }
+    root.classList.toggle("light", data.isLight === true);
+    root.style.setProperty("color-scheme", data.isLight === true ? "light" : "dark");
+  });
+})();`;
 
 /**
  * A document that wants Review's theme says so with
