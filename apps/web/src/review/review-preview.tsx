@@ -461,8 +461,9 @@ function StalledEntryNotice({
         <strong>This page has not finished loading</strong>
         <p>
           <code>{path}</code> is still loading after {stalledEntryTimeoutMs / 1_000} seconds.
-          Review runs pages in a sandbox without storage, workers, or embedded
-          frames, so a page that needs them may never finish here.
+          Review runs pages in a sandbox without workers or embedded frames,
+          and their storage lasts only one load, so a page that needs more may
+          never finish here.
         </p>
       </div>
       <div className="as-preview-stalled__actions">

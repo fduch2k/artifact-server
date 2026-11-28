@@ -313,12 +313,15 @@ browser focus and button semantics remain intact.
 
 ### HTML fragment navigation
 
-In Interact mode, ordinary same-frame fragment-only links in HTML previews
-scroll to an element ID or legacy named anchor within the rendered document.
-Encoded fragments and keyboard activation work; an empty fragment returns to
-the top. Missing or malformed targets cannot navigate to the injected resource
-base URL. Authored element and document click cancellation and Annotate mode
-retain ownership of their gestures. Modified clicks, downloads, and other browsing targets retain
+Ordinary same-frame fragment-only links in HTML previews scroll to an element
+ID or legacy named anchor within the rendered document, in Interact mode and,
+for a plain click, in Annotate mode too. Encoded fragments and keyboard
+activation work; an empty fragment and `#top` without a matching element
+return to the top. Missing or malformed targets cannot navigate to the
+injected resource base URL. The artifact's own element and document click
+handlers still run, but cancelling the click does not stop the scroll
+(ADR 0046). In Annotate mode a Ctrl- or Cmd-click on a link pins it for a
+comment instead of following it. Downloads and other browsing targets retain
 their authored behavior. This preview behavior changes scrolling and focus,
 without emulating URL hash changes or browser history. It preserves stored
 artifact bytes, relative resource resolution, and the opaque-origin sandbox.
@@ -338,15 +341,15 @@ never leaves the Review background showing through an artifact canvas.
 ### HTML preview text selection
 
 Selecting text in an HTML preview keeps the selection and keyboard focus on
-the artifact and offers Copy and Comment beside it, in Annotate and Interact
-mode alike. The browser's copy shortcut and the Copy control both put exactly
+the artifact and offers Copy, Comment, and a one-click Looks good comment
+beside it, in Annotate and Interact mode alike. The browser's copy shortcut and the Copy control both put exactly
 the selected text on the clipboard, and copying creates no comment. A comment
 starts only when the reader asks for one: the Comment control opens the
 composer quoting the selection, and typing a character opens it with that
 character as the start of the comment. Escape dismisses the offer without a
 comment, and the next selection offers Copy and Comment again. A plain click
 on an element in Annotate mode still opens the composer on that element
-directly. Every control on that offer stands out from it in the dark and light
+directly; on a link with a destination it follows the link (ADR 0046). Every control on that offer stands out from it in the dark and light
 Review themes, at a contrast of at least 3:1.
 
 ### Review route resolution
