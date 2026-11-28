@@ -246,7 +246,7 @@ describe("Review preview host", () => {
   test("CNT-014-B: Review renews its own lease while the view is open, without changing its origin", async () => {
     const site = await publishSite("account_required", "cnt-014-lease-renewal");
     const lease = await issueLease(site);
-    const renewed = await fetch(`${leaseEndpoint(site).replace("/preview-leases?", "/preview-leases/renewals?")}`, {
+    const renewed = await fetch(leaseEndpoint(site).replace("/preview-leases?", "/preview-leases/renewals?"), {
       body: JSON.stringify({baseUrl: lease.baseUrl}),
       headers: {
         Authorization: `Bearer ${installation.apiToken}`,
@@ -274,15 +274,11 @@ describe("Review preview host", () => {
     const lease = await issueLease(site);
     const renewalUrl = (artifactId: string, versionId: string): string =>
       `${server.baseUrl}/api/v1/artifacts/${artifactId}/versions/${versionId}/preview-leases/renewals?projectId=${site.projectId}`;
-    const renew = (url: string, baseUrl: string, authorized = true): Promise<Response> =>
-      fetch(url, {
-        body: JSON.stringify({baseUrl}),
-        headers: {
-          ...(authorized ? {Authorization: `Bearer ${installation.apiToken}`} : {}),
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
+    const renew = (url: string, baseUrl: string, authorized = true): Promise<Response> => {
+      const headers = new Headers({"Content-Type": "application/json"});
+      if (authorized) headers.set("Authorization", `Bearer ${installation.apiToken}`);
+      return fetch(url, {body: JSON.stringify({baseUrl}), headers, method: "POST"});
+    };
 
     expect((await renew(renewalUrl(site.artifactId, site.versionId), lease.baseUrl, false)).status)
       .toBe(401);

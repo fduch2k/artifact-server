@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin, type ProxyOptions } from "vite";
+import { z } from "zod";
 
 export default defineConfig({
   build: {
@@ -45,6 +46,12 @@ export default defineConfig({
  * out of the dependency into `review-bridge.json`, which the server reads from
  * the web assets. The module is plain string constants with no imports.
  */
+const bridgeModuleSchema = z.object({
+  ANNOTATION_HIGHLIGHT_CSS: z.string(),
+  BRIDGE_SCRIPT: z.string().min(1),
+  LIVE_BRIDGE_BOOTSTRAP: z.string().min(1),
+});
+
 function reviewBridgeAsset(): Plugin {
   return {
     apply: "build",
@@ -57,24 +64,18 @@ function reviewBridgeAsset(): Plugin {
       }
       const source = await readFile(resolved.id, "utf8");
       const encoded = Buffer.from(source, "utf8").toString("base64");
-      const bridgeModule: unknown = await import(
+      const parsed = bridgeModuleSchema.safeParse(await import(
         /* @vite-ignore */ `data:text/javascript;base64,${encoded}`
-      );
-      const text = (name: string): string => {
-        const value: unknown = typeof bridgeModule === "object" && bridgeModule !== null
-          ? Reflect.get(bridgeModule, name)
-          : undefined;
-        if (typeof value !== "string" || value.length === 0) {
-          this.error(`The Plannotator bridge script no longer exports ${name}.`);
-        }
-        return value;
-      };
+      ));
+      if (!parsed.success) {
+        this.error(`The Plannotator bridge script changed its exports: ${parsed.error.message}`);
+      }
       this.emitFile({
         fileName: "review-bridge.json",
         source: JSON.stringify({
-          bootstrap: text("LIVE_BRIDGE_BOOTSTRAP"),
-          bridge: text("BRIDGE_SCRIPT"),
-          css: text("ANNOTATION_HIGHLIGHT_CSS"),
+          bootstrap: parsed.data.LIVE_BRIDGE_BOOTSTRAP,
+          bridge: parsed.data.BRIDGE_SCRIPT,
+          css: parsed.data.ANNOTATION_HIGHLIGHT_CSS,
         }),
         type: "asset",
       });

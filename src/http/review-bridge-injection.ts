@@ -143,8 +143,17 @@ function hasHostThemeOptIn(html: string): boolean {
   );
 }
 
+/** The configuration the live bridge reads from `window.__plannotatorLiveConfig`. */
+interface LiveBridgeConfig {
+  readonly css: string;
+  readonly editorOrigins: readonly string[];
+  readonly frameDepth: number;
+  readonly hostTheme: boolean;
+  readonly token: string;
+}
+
 /** JSON that cannot close the surrounding `<script>` or break a JS string. */
-function scriptSafeJson(value: unknown): string {
+function scriptSafeJson(value: LiveBridgeConfig): string {
   return JSON.stringify(value)
     .replaceAll("<", "\\u003c")
     .replaceAll(">", "\\u003e")

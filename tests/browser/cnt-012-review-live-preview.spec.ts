@@ -1,4 +1,5 @@
 import {expect, test, type Frame, type FrameLocator, type Page} from "@playwright/test";
+import {z} from "zod";
 
 import {
   commitStagedUpload,
@@ -96,6 +97,77 @@ const deckFiles: readonly TestSiteFile[] = [
   file("assets/deck.js", deckRuntime, "text/javascript; charset=utf-8"),
   file("assets/worker.js", deckWorker, "text/javascript; charset=utf-8"),
 ];
+
+const pageAnchorSchema = z.object({pageUrl: z.string()});
+
+const hostileProbesSchema = z.object({
+  comment: z.string(),
+  cookieNames: z.array(z.string()),
+  opener: z.string(),
+  parent: z.string(),
+  session: z.array(z.string()),
+  storage: z.string(),
+  top: z.string(),
+  topNavigation: z.string(),
+});
+
+/*
+ * Artifact code that tries everything CMT-014 forbids. The application
+ * origin is guessed the way a page could: the loopback address on its own
+ * port, plus every editor origin the bridge configuration lists.
+ */
+const hostileProbePage = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Hostile probe</title></head>
+<body>
+<p id="probe-target">Probe target</p>
+<script>
+  var rect = {bottom: 40, height: 20, left: 10, right: 110, top: 20, width: 100, x: 10, y: 20};
+  function config() { return window.__plannotatorLiveConfig || {editorOrigins: [], token: ""}; }
+  function outcome(run) { try { run(); return "reached"; } catch (error) { return "blocked"; } }
+  function reach(url, init) {
+    init.credentials = "include";
+    return fetch(url, init).then(function (response) { return "read:" + response.status; }, function () { return "blocked"; });
+  }
+  window.runProbes = function (artifactId, versionId) {
+    var application = location.protocol + "//127.0.0.1:" + location.port;
+    var origins = [application].concat(config().editorOrigins);
+    var comments = application + "/api/v1/artifacts/" + artifactId + "/versions/" + versionId + "/comments?projectId=prj_default";
+    var body = JSON.stringify({anchor: null, body: "Posted by the artifact itself"});
+    return Promise.all([
+      Promise.all(origins.map(function (origin) { return reach(origin + "/api/v1/session", {}); })),
+      reach(comments, {body: body, headers: {"Content-Type": "application/json"}, method: "POST"}),
+      fetch(comments, {body: body, credentials: "include", method: "POST", mode: "no-cors"}).catch(function () {}),
+    ]).then(function (answers) {
+      return JSON.stringify({
+        comment: answers[1],
+        cookieNames: document.cookie.split(";").map(function (part) { return part.trim().split("=")[0]; }).filter(Boolean),
+        opener: window.open("about:blank") === null ? "blocked" : "reached",
+        parent: outcome(function () { return window.parent.document.title; }),
+        session: answers[0],
+        storage: outcome(function () { localStorage.setItem("probe", "own origin storage"); }),
+        top: outcome(function () { return window.top.document.title; }),
+        topNavigation: outcome(function () { window.top.location.href = application + "/navigated-by-artifact"; }),
+      });
+    });
+  };
+  window.forgeWithoutToken = function () {
+    var selection = {pinpoint: true, rect: rect, text: "Forged selection", type: "plannotator-bridge-selection"};
+    var submit = {anchor: null, body: "Forged submit", originalText: "", type: "as-review-submit", v: 1};
+    [window.parent, window.top].forEach(function (target) {
+      target.postMessage(selection, "*");
+      target.postMessage(Object.assign({}, selection, {token: "not-the-live-token"}), "*");
+      target.postMessage(submit, "*");
+    });
+  };
+  window.forgeWithToken = function () {
+    config().editorOrigins.forEach(function (origin) {
+      window.parent.postMessage({pinpoint: true, rect: rect, text: "Token selection", token: config().token, type: "plannotator-bridge-selection"}, origin);
+    });
+  };
+</script>
+</body>
+</html>`;
 
 interface PublishedSite {
   readonly artifactId: string;
@@ -210,12 +282,9 @@ test.describe("Review runs a version live on its preview origin", () => {
       await expect(artifact.locator("[data-plannotator-marker]")).toHaveCount(1);
 
       const threads = await listThreadsOverApi(fixture, deck.artifactId);
-      const pageOf = (body: string): unknown => {
-        const anchor = threads.find((thread) => thread.body === body)?.anchor;
-        return typeof anchor === "object" && anchor !== null
-          ? Reflect.get(anchor, "pageUrl")
-          : undefined;
-      };
+      const pageOf = (body: string): string | undefined => pageAnchorSchema.safeParse(
+        threads.find((thread) => thread.body === body)?.anchor,
+      ).data?.pageUrl;
       expect(threads).toHaveLength(2);
       expect(pageOf("Tighten the title slide.")).toBe("/");
       expect(pageOf("Second slide needs a chart.")).toBe("/2");
@@ -237,7 +306,7 @@ test.describe("Review runs a version live on its preview origin", () => {
     try {
       const published = await publishNew(fixture.server, fixture.installation, {
         accessSetting: "account_required",
-        content: "<!doctype html><title>Hostile probe</title><p id=\"probe-target\">Probe target</p>",
+        content: hostileProbePage,
         idempotencyKey: "cnt-012-hostile-artifact",
         name: "Hostile probe",
       });
@@ -250,65 +319,16 @@ test.describe("Review runs a version live on its preview origin", () => {
       await expect(reviewFrame(fixture.page).locator("iframe"))
         .toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
       const artifactPage = await artifactDocument(fixture.page);
-      const applicationOrigin = new URL(fixture.server.baseUrl).origin;
 
-      // Everything below runs as the artifact's own JavaScript, in its realm.
-      const probes = await artifactPage.evaluate(async ({applicationOrigin: appOrigin, artifactId: artifact, versionId: version}) => {
-        const outcome = (run: () => unknown): string => {
-          try {
-            run();
-            return "reached";
-          } catch {
-            return "blocked";
-          }
-        };
-        const reach = async (url: string, init: RequestInit): Promise<string> => {
-          try {
-            const response = await fetch(url, {...init, credentials: "include"});
-            return `read:${response.status}`;
-          } catch {
-            return "blocked";
-          }
-        };
-        const config: unknown = Reflect.get(window, "__plannotatorLiveConfig");
-        const editorOrigins = typeof config === "object" && config !== null
-          ? (Reflect.get(config, "editorOrigins") as string[])
-          : [];
-        const session = await Promise.all(
-          [appOrigin, ...editorOrigins].map((origin) => reach(`${origin}/api/v1/session`, {})),
-        );
-        const comment = await reach(
-          `${appOrigin}/api/v1/artifacts/${artifact}/versions/${version}/comments?projectId=prj_default`,
-          {
-            body: JSON.stringify({anchor: null, body: "Posted by the artifact itself"}),
-            headers: {"Content-Type": "application/json"},
-            method: "POST",
-          },
-        );
-        await fetch(`${appOrigin}/api/v1/artifacts/${artifact}/versions/${version}/comments?projectId=prj_default`, {
-          body: JSON.stringify({anchor: null, body: "Posted blind by the artifact"}),
-          credentials: "include",
-          method: "POST",
-          mode: "no-cors",
-        }).catch(() => undefined);
-        return {
-          comment,
-          cookieNames: document.cookie.split(";").map((part) => part.trim().split("=")[0]).filter(Boolean),
-          opener: window.open("about:blank") === null ? "blocked" : "reached",
-          parent: outcome(() => window.parent.document.title),
-          session,
-          storage: outcome(() => localStorage.setItem("probe", "own origin storage")),
-          top: outcome(() => window.top?.document.title),
-          topNavigation: outcome(() => {
-            if (window.top !== null) window.top.location.href = `${appOrigin}/navigated-by-artifact`;
-          }),
-        };
-      }, {applicationOrigin, artifactId, versionId});
-
+      // The probes are the artifact's own JavaScript, run in its realm.
+      const probes = hostileProbesSchema.parse(JSON.parse(String(await artifactPage.evaluate(
+        `window.runProbes(${JSON.stringify(artifactId)}, ${JSON.stringify(versionId)})`,
+      ))));
       expect(probes.parent).toBe("blocked");
       expect(probes.top).toBe("blocked");
       expect(probes.topNavigation).toBe("blocked");
       expect(probes.opener).toBe("blocked");
+      expect(probes.session.length).toBeGreaterThan(1);
       expect(probes.session.every((answer) => answer === "blocked")).toBe(true);
       expect(probes.comment).toBe("blocked");
       expect(probes.cookieNames).toEqual([]);
@@ -318,33 +338,17 @@ test.describe("Review runs a version live on its preview origin", () => {
 
       // Bridge and review-frame messages forged without the live token, with
       // a wrong one, or aimed at the shell's own protocol do nothing.
-      await artifactPage.evaluate(() => {
-        const rect = {bottom: 40, height: 20, left: 10, right: 110, top: 20, width: 100, x: 10, y: 20};
-        const selection = {pinpoint: true, rect, text: "Forged selection", type: "plannotator-bridge-selection"};
-        const submit = {anchor: null, body: "Forged submit", originalText: "", type: "as-review-submit", v: 1};
-        for (const target of [window.parent, window.top]) {
-          if (target === null) continue;
-          target.postMessage(selection, "*");
-          target.postMessage({...selection, token: "not-the-live-token"}, "*");
-          target.postMessage(submit, "*");
-        }
-      });
+      await artifactPage.evaluate("window.forgeWithoutToken()");
       await fixture.page.waitForTimeout(500);
-      await expect(reviewFrame(fixture.page).getByPlaceholder("Add a comment...")).toHaveCount(0);
+      const composer = reviewFrame(fixture.page).getByPlaceholder("Add a comment...");
+      await expect(composer).toHaveCount(0);
 
       // With the live token, which its own realm can read, the artifact can
-      // at most open the composer; posting still needs the reviewer.
-      await artifactPage.evaluate(() => {
-        const config: unknown = Reflect.get(window, "__plannotatorLiveConfig");
-        const token = typeof config === "object" && config !== null ? Reflect.get(config, "token") : "";
-        const rect = {bottom: 40, height: 20, left: 10, right: 110, top: 20, width: 100, x: 10, y: 20};
-        for (const origin of [window.location.origin.replace(/^http:\/\/[^.]+\./u, "http://"), "http://127.0.0.1:" + window.location.port]) {
-          window.parent.postMessage({pinpoint: true, rect, text: "Token selection", token, type: "plannotator-bridge-selection"}, origin);
-        }
-      });
-      // The same message shape with the token does reach the viewer, so the
-      // refusals above were the token check, not a malformed message.
-      await expect(reviewFrame(fixture.page).getByPlaceholder("Add a comment...")).toBeVisible();
+      // at most open the composer; the same message shape therefore reaches
+      // the viewer, so the refusals above were the token check. Posting a
+      // comment still needs the reviewer.
+      await artifactPage.evaluate("window.forgeWithToken()");
+      await expect(composer).toBeVisible();
       await fixture.page.waitForTimeout(500);
       expect(await listThreadsOverApi(fixture, artifactId)).toHaveLength(0);
     } finally {
@@ -368,11 +372,7 @@ test.describe("Review runs a version live on its preview origin", () => {
       await expect(artifactFrame(fixture.page).locator("#probe-target")).toBeVisible();
       const applicationOrigin = new URL(fixture.server.baseUrl).origin;
       const refused = reviewFrame(fixture.page).getByText("Review could not open this version's preview.");
-      for (const source of [
-        {liveOrigin: applicationOrigin, src: `${applicationOrigin}/review`},
-        {liveOrigin: "http://review-a.localhost:1", src: `${applicationOrigin}/review`},
-        {liveOrigin: "null", src: "javascript:alert(1)"},
-      ]) {
+      const expectRefused = async (source: {readonly liveOrigin: string; readonly src: string}): Promise<void> => {
         await fixture.page.evaluate((message) => {
           const frame = window.document.querySelector<HTMLIFrameElement>(".as-artifact-frame");
           frame?.contentWindow?.postMessage(
@@ -382,7 +382,10 @@ test.describe("Review runs a version live on its preview origin", () => {
         }, source);
         await expect(refused).toBeVisible();
         await expect(reviewFrame(fixture.page).locator("iframe")).toHaveCount(0);
-      }
+      };
+      await expectRefused({liveOrigin: applicationOrigin, src: `${applicationOrigin}/review`});
+      await expectRefused({liveOrigin: "http://review-a.localhost:1", src: `${applicationOrigin}/review`});
+      await expectRefused({liveOrigin: "null", src: "javascript:alert(1)"});
     } finally {
       await stopBrowserFixture(fixture);
     }

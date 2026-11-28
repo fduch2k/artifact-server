@@ -232,16 +232,6 @@ describe("content access lifecycle", () => {
         })
       ),
     );
-    const renew = (token: Redacted.Redacted, principal: Principal = testPrincipal, target = published) =>
-      ContentAccessService.use((contentAccess) =>
-        contentAccess.renewPreviewLease({
-          artifactId: target.artifact.id,
-          principal,
-          projectId: null,
-          token,
-          versionId: target.version.id,
-        })
-      );
     const lease = await issue();
     const issuedAt = clock.now().getTime();
     expect(Date.parse(lease.expiresAt) - issuedAt).toBe(15 * 60_000);
@@ -249,7 +239,7 @@ describe("content access lifecycle", () => {
     // Ten minutes in, renewal moves expiry to fifteen minutes from now, and
     // the lease keeps serving past its original expiry.
     clock.set(new Date(issuedAt + 10 * 60_000));
-    const renewed = await runtime.runPromise(renew(lease.token));
+    const renewed = await runtime.runPromise(renewLease(lease.token, testPrincipal, published));
     expect(renewed.versionId).toBe(published.version.id);
     expect(Date.parse(renewed.expiresAt)).toBe(issuedAt + 25 * 60_000);
     clock.set(new Date(issuedAt + 20 * 60_000));
@@ -262,16 +252,16 @@ describe("content access lifecycle", () => {
 
     // The same lease through another artifact's route, or held by another
     // principal, is not this caller's lease to renew.
-    await expectFailure("PreviewLeaseExpired", renew(lease.token, testPrincipal, other));
-    await expectFailure("PreviewLeaseExpired", renew(lease.token, {
+    await expectFailure("PreviewLeaseExpired", renewLease(lease.token, testPrincipal, other));
+    await expectFailure("PreviewLeaseExpired", renewLease(lease.token, {
       ...testPrincipal,
       id: "another-service-principal",
-    }));
-    await expectFailure("PreviewLeaseExpired", renew(Redacted.make("not-a-review-lease")));
+    }, published));
+    await expectFailure("PreviewLeaseExpired", renewLease(Redacted.make("not-a-review-lease"), testPrincipal, published));
 
     // Once expired, the lease stays expired: Review must take a new one.
     clock.set(new Date(issuedAt + 25 * 60_000));
-    await expectFailure("PreviewLeaseExpired", renew(lease.token));
+    await expectFailure("PreviewLeaseExpired", renewLease(lease.token, testPrincipal, published));
     await expectFailure("ContentSessionRequired",
       ContentAccessService.use((contentAccess) =>
         contentAccess.authorizePreviewContent({fallback: "entry", path: "", token: lease.token})
@@ -299,6 +289,23 @@ describe("content access lifecycle", () => {
     })).toBe(expectedTag);
   }
 });
+
+/** Renew one Review lease through the service, as the HTTP route does. */
+function renewLease(
+  token: Redacted.Redacted,
+  principal: Principal,
+  target: {readonly artifact: {readonly id: string}; readonly version: {readonly id: string}},
+) {
+  return ContentAccessService.use((contentAccess) =>
+    contentAccess.renewPreviewLease({
+      artifactId: target.artifact.id,
+      principal,
+      projectId: null,
+      token,
+      versionId: target.version.id,
+    })
+  );
+}
 
 const testPrincipal: Principal = {
   authorizedByPrincipalId: null,
