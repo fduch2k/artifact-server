@@ -3206,6 +3206,13 @@ export function createD1ArtifactRepository(
         .first<z.input<typeof contentRecordSchema>>();
       return row === null ? null : contentRecordSchema.parse(row);
     },
+    extendPreviewLease: async (tokenDigest, requestTime, expiresAt) => {
+      const result = await database.prepare(`
+        UPDATE content_sessions SET expires_at = MAX(expires_at, ?)
+        WHERE token_digest = ? AND expires_at > ?
+      `).bind(expiresAt, tokenDigest, requestTime).run();
+      return result.meta.changes > 0;
+    },
     createThread: async (
       command: CreateCommentThread,
     ): Promise<CommentThreadCreation> => {
